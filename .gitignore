@@ -1,0 +1,49 @@
+# 金鑰與個人設定（FinMind token、Anthropic 金鑰、群益帳密）
+data/settings.json
+data/settings.json.*
+
+# 資料庫
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+
+# data/ 下的行情資料、log、快取一律不收，只留少數自己編的設定與研究結果
+data/*
+!data/ideas.json
+!data/strategies.json
+!data/notes.json
+!data/fut_groups.json
+!data/live_groups.json
+!data/limitup_stats.json
+
+# 研究輸出（大型 pkl/csv 可重跑產生）
+research/out/
+
+# 報表、備份
+reports/
+backup/
+
+# 舊版備份檔（改用 git 記錄版本）
+*.bak
+*.bak[0-9]
+*.bak_*
+*.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9].bak
+
+# log
+*.log
+*.err
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 編輯器 / 系統
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.claude/settings.local.json
