@@ -322,8 +322,10 @@ def status():
     _init(con)
     r = con.execute("SELECT MIN(date), MAX(date), COUNT(DISTINCT date) FROM opt_inst").fetchone()
     s = con.execute("SELECT MIN(date), MAX(date), COUNT(DISTINCT date) FROM opt_strike").fetchone()
+    t = con.execute("SELECT MAX(date) FROM fut_tx WHERE session='一般'").fetchone()[0]
     con.close()
-    return {"inst": r, "strike": s}
+    return {"inst": r, "strike": s, "tx": t,
+            "done": min(r[1] or "", s[1] or "", t or "")}   # 三樣都抓到的最新日期（未平倉、履約價、台指期日盤）
 
 
 # ---------------- 分析 ----------------
@@ -575,7 +577,9 @@ def _strikes(con, date, px, fx=None):
 def report(date=None):
     con = connect()
     _init(con)
-    stamp = con.execute("SELECT MAX(date), COUNT(*) FROM opt_inst").fetchone()
+    stamp = (con.execute("SELECT MAX(date), COUNT(*) FROM opt_inst").fetchone()   # 履約價、台指期晚到也要重算
+             + con.execute("SELECT MAX(date), COUNT(*) FROM opt_strike").fetchone()
+             + con.execute("SELECT MAX(date), COUNT(*) FROM fut_tx").fetchone())
     key = (date, stamp)
     if key in _cache:
         con.close()

@@ -87,7 +87,7 @@ def scheduler():
             ft = p.get("fut_time", "16:00")
             if (now.weekday() < 5 and ft and ft <= hm < "23:50" and not fut_job["running"]
                     and (fut_job["last_try"] is None or now - fut_job["last_try"] > dt.timedelta(minutes=30))
-                    and (options.status()["inst"][1] or "") < now.date().isoformat()):
+                    and options.status()["done"] < now.date().isoformat()):   # 未平倉、履約價、台指期都抓到今天才算完成
                 fut_job["last_try"] = now
                 threading.Thread(target=run_fut, daemon=True).start()
             if now.weekday() < 5 and hm < "23:50" and not chips_job["running"]:
@@ -142,6 +142,18 @@ def startup():
         job.update(running=False, msg="")
     if engine.date is None:  # 第一次使用，資料庫是空的
         run_update()
+    try:                     # 開 App 時最近交易日的未平倉還沒抓（例如下午 4 點後才開）→ 先補抓一次
+        now = dt.datetime.now()
+        day = now.date()
+        if now.weekday() >= 5 or now.strftime("%H:%M") < (settings.load().get("fut_time") or "16:00"):
+            day -= dt.timedelta(days=1)
+        while day.weekday() >= 5:
+            day -= dt.timedelta(days=1)
+        if options.status()["done"] < day.isoformat() and not fut_job["running"]:
+            fut_job["last_try"] = now
+            threading.Thread(target=run_fut, daemon=True).start()
+    except Exception:
+        traceback.print_exc()
     try:                     # 先把今日盤勢分析算好（第一次大約 20 秒）
         market_brief.report()
     except Exception:

@@ -299,6 +299,18 @@ $("chBack").onclick = async () => {
 
 // ---------- 選擇權未平倉 ----------
 let OPT = null, optDate = "", optWin = 5, optGrp = "t10s", optCt = 0, OPT_CHART = null;   // optCt 0＝最近的月選
+let OPT_ST = null;   // 載入 OPT 時的 /api/options/status，用來判斷背景更新後要不要重載
+const optStamp = s => s ? [s.inst && s.inst[1], s.strike && s.strike[1], s.tx].join("|") : "";
+// 每分鐘看一次：背景排程（或別的視窗）抓完新資料就丟掉舊的 OPT；開著這個分頁才重畫
+setInterval(async () => {
+  if (!OPT || !OPT_ST) return;
+  let s; try { s = await api("/api/options/status"); } catch(e) { return; }
+  if (s.running || (optStamp(s) === optStamp(OPT_ST) && !OPT_ST.running)) return;
+  const ds = OPT.dates || [];
+  if (optDate === ds[ds.length - 1]) optDate = "";   // 原本看最新一天 → 跳到新的一天
+  OPT = null;
+  if (window.CUR_PAGE === "chips" && chTab === "opt") optShow();
+}, 60000);
 let optSess = lsGet("optSess", "TX"), optTf = lsGet("optTf", "D");
 const OPT_G = {foreign: "外資", t10s: "十大特定法人", t10x: "十大非特定法人", dealer: "自營商"};
 const viewCls = v => v === "偏多" ? "up" : v === "偏空" ? "down" : "";
@@ -308,6 +320,7 @@ async function optShow(){
   if (!OPT || (optDate && OPT.date !== optDate)) {
     $("chBody").innerHTML = `<div class="k" style="padding:20px">整理選擇權資料中…</div>`;
     try { OPT = await api("/api/options" + (optDate ? "?date=" + optDate : "")); } catch(e) { setTimeout(optShow, 3000); return; }
+    try { OPT_ST = await api("/api/options/status"); } catch(e) {}
   }
   if (chTab !== "opt") return;       // 載入期間已經切到別的分頁
   if (OPT.error) { $("chBody").innerHTML = `<div class="k" style="padding:20px">${OPT.error}</div>`; return; }
@@ -333,7 +346,9 @@ function optHtml(){
   const mx = ct ? Math.max(...ct.dist.map(x => Math.max(x.c, x.p)), 1) : 1;
   const resK = new Set(ct ? (ct.s_res.length ? ct.s_res : ct.res).map(x => x.k) : []), supK = new Set(ct ? (ct.s_sup.length ? ct.s_sup : ct.sup).map(x => x.k) : []);
   const sv = v => v ? `<span class="${v > 0 ? "opt-sell" : "opt-cover"}">${v > 0 ? "賣+" : "補"}${Math.abs(v).toLocaleString()}</span>` : "";
-  return `<div class="ch-cards">
+  const latest = o.dates[o.dates.length - 1], ss = OPT_ST;
+  return `<div class="k" style="margin:2px 0 6px">📅 資料日期 <b>${o.date}</b>${o.date !== latest ? `（最新 ${latest}）` : ""}${ss ? `｜資料庫：未平倉 ${ss.inst[1] || "–"}、履約價 ${ss.strike[1] || "–"}、台指期 ${ss.tx || "–"}${ss.running ? "｜⏳ 更新中…" : ""}` : ""}</div>
+    <div class="ch-cards">
       ${card("台指期（近月）", fmt(t.close, 0), `5日 ${chP(t.chg5)}｜10日 ${chP(t.chg10)}${t.night ? `｜夜盤 ${chP(t.night.chg)}` : ""}`)}
       ${card("綜合判斷（大戶）", `<span class="${viewCls(sm.view)}">${sm.view}</span>`, `分數 ${sm.score > 0 ? "+" : ""}${sm.score}（外資＋十大，近 1 週權重最高）`)}
       ${card("Put/Call 未平倉比", pc ? pc.oi + "%" : "–", `成交量比 ${pc ? pc.vol + "%" : "–"}｜>100% 代表 Put 比較多`)}
