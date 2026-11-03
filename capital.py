@@ -359,8 +359,8 @@ def subscribe_ticks(code):
 
 
 def pin(codes):
-    """四格看盤：固定訂這幾檔的逐筆＋五檔"""
-    _pinned[:] = [c for c in codes if c][:MAX_TICKS]
+    """五格看盤：固定訂這幾檔的逐筆＋五檔（最多 MAX_TICKS-1 檔，留一個給看盤／個股走勢圖）"""
+    _pinned[:] = [c for c in codes if c][:MAX_TICKS - 1]
     for c in _pinned:
         subscribe_ticks(c)
 
@@ -413,7 +413,7 @@ def record_start(codes):
     os.makedirs(REC_DIR, exist_ok=True)
     name = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     f = open(os.path.join(REC_DIR, name + ".jsonl"), "w", encoding="utf-8", buffering=1)   # 一行寫一次，當掉也不會掉資料
-    slots = [c or "" for c in codes][:8]    # 保留格子位置（A 組 0~3、B 組 4~7），重播才知道哪檔在哪格
+    slots = [c or "" for c in codes][:10]   # 保留格子位置（A 組 0~4、B 組 5~9），重播才知道哪檔在哪格
     codes = [c for c in slots if c]
     f.write(json.dumps({"k": "meta", "codes": codes, "slots": slots, "names": {c: _names.get(c, "") for c in codes},
                         "ref": {c: (_quotes.get(c) or {}).get("y") for c in codes}, "t": _now_sec()}, ensure_ascii=False) + "\n")

@@ -316,8 +316,8 @@ def rt_watch_set():
 
 @app.get("/api/rt/board")
 def rt_board():
-    """四格看盤：A、B 兩組共 8 檔都訂逐筆＋五檔，只回傳正在看的那組（grp=0/1）的五檔、最近逐筆、1 分K"""
-    codes = ([c.strip() for c in request.args.get("codes", "").split(",")] + [""] * 8)[:8]
+    """五格看盤：A、B 兩組共 10 格都訂逐筆＋五檔，只回傳正在看的那組（grp=0/1，每組 5 格）的五檔、最近逐筆、1 分K"""
+    codes = ([c.strip() for c in request.args.get("codes", "").split(",")] + [""] * 10)[:10]
     grp = 1 if request.args.get("grp") == "1" else 0
     p = settings.load()
     if codes != p.get("rt_board"):
@@ -325,11 +325,11 @@ def rt_board():
         settings.save(p)
     if not capital.ready():
         return jsonify(ready=False, msg=capital.status["msg"], rec=capital.record_status())
-    capital.pin(codes)
+    capital.pin(codes[grp * 5:grp * 5 + 5] + codes[(1 - grp) * 5:(1 - grp) * 5 + 5])   # 正在看的那組先訂
     capital.subscribe([c for c in codes if c])
     names = _names_of([c for c in codes if c])
     out = []
-    for c in codes[grp * 4:grp * 4 + 4]:
+    for c in codes[grp * 5:grp * 5 + 5]:
         if not c:
             out.append(None)
             continue
@@ -338,7 +338,7 @@ def rt_board():
         q = capital._quotes.get(c, {})
         st, cum = capital.tick_stats(t)
         out.append({"code": c, "name": names.get(c, ""), "ref": q.get("y"), "q": q, "best5": capital._best5.get(c),
-                    "ticks": [list(x) + [s] for x, s in zip(t[-60:], cum[-60:])], "n": len(t), "st": st,
+                    "ticks": [list(x) + [s] for x, s in zip(t[-300:], cum[-300:])], "n": len(t), "st": st,
                     "bars": [[int(r.date), r.open, r.high, r.low, r.close, int(r.volume / 1000)] for r in b.itertuples()]})
     return jsonify(ready=True, panes=out, rec=capital.record_status())
 

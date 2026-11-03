@@ -93,9 +93,26 @@ function spGrid(qb){
   });
 }
 
+// 五格直式：走勢圖 ↔ 下面統計／五檔／明細 的上下分隔線，五格一起變（記在 split_qb5Chart，px）
+function spQb5(chart){
+  chart.dataset.sp = "1";
+  const qb = chart.closest(".qb5"), saved = spGet("qb5Chart");
+  const set = px => px == null ? qb.style.removeProperty("--qb5ChartH") : qb.style.setProperty("--qb5ChartH", px + "px");
+  if (saved != null) set(saved);
+  const h = document.createElement("div");
+  h.className = "resizer sp-v"; h.title = "上下拖拉調整走勢圖高度（點兩下恢復預設）";
+  chart.after(h);
+  let h0, max;
+  spDrag(h, "row-resize", () => { h0 = chart.getBoundingClientRect().height; max = Math.max(100, chart.parentElement.getBoundingClientRect().height - 160); },
+    (dx, dy) => set(Math.round(Math.max(80, Math.min(max, h0 + dy)))),
+    () => spSet("qb5Chart", Math.round(chart.getBoundingClientRect().height)));
+  h.ondblclick = () => { spSet("qb5Chart", null); set(null); spNotify(); };
+}
+
 function spScan(){
-  for (const rule of SP_RULES) document.querySelectorAll(rule.sel).forEach(el => { if (!el.dataset.sp) spAttach(el, rule); });
-  document.querySelectorAll(".qb").forEach(qb => { if (!qb.querySelector(":scope > .sp-g")) spGrid(qb); });
+  for (const rule of SP_RULES) document.querySelectorAll(rule.sel).forEach(el => { if (!el.dataset.sp && !el.closest(".qb5")) spAttach(el, rule); });
+  document.querySelectorAll(".qb:not(.qb5)").forEach(qb => { if (!qb.querySelector(":scope > .sp-g")) spGrid(qb); });
+  document.querySelectorAll(".qb5 .qp-main > .qp-chart").forEach(el => { if (!el.dataset.sp) spQb5(el); });
 }
 let spPending = false;
 new MutationObserver(() => {

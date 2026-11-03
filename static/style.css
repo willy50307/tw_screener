@@ -613,6 +613,26 @@ table.qw th:nth-child(-n+2),table.qw td:nth-child(-n+2){text-align:left}
 .qr-ctl .q-grp{margin:0}
 .qb-msg:empty{display:none}
 .qb-msg{padding:6px 0}
+/* 五格直式（2026-11-03）：五欄並排，每格由上而下 = 小走勢圖 → 統計 → 五檔 → 即時明細（佔掉剩下的高度） */
+.q-head-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.q-head-ctl .q-grp{margin:0}
+.q-head-ctl select{padding:4px 8px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:4px;font:inherit;max-width:360px}
+.q-head-ctl .btn{padding:4px 12px}
+.qr-play{display:flex;gap:8px;align-items:center}
+.q-head-ctl .qr-ctl{margin:0;flex-wrap:wrap}
+#qrSlider{width:260px}
+.qb.qb5{grid-template-columns:repeat(5,minmax(0,1fr));grid-template-rows:minmax(0,1fr);min-height:600px}
+.qb5 .qp-head{flex-wrap:wrap;row-gap:2px}
+.qb5 .qp-main{flex-direction:column}
+.qb5 .qp-chart{flex:0 0 var(--qb5ChartH,140px);min-height:80px}
+.qb5 .qp-side{width:auto!important;max-width:none!important;flex:1 1 auto!important;border-left:none;border-top:1px solid #333}
+.qb5 .qp-main > .sp-h{display:none}
+.qb5 .qp-main > .sp-v{height:5px;background:#333;cursor:row-resize;flex-shrink:0}
+.qb5 .qp-main > .sp-v:hover,body.resizing .qb5 .qp-main > .sp-v{background:var(--accent)}
+.qb5 .qp-ticks{min-height:120px}
+.qb5 .qp-ticks td{line-height:15px}
+.qb5 .qp-st td{line-height:15px}
+.qb5 .qp-b5 td{line-height:16px}
 .qb{flex:1;min-height:560px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:4px;background:#000}
 .qp{background:#000;border:1px solid #333;display:flex;flex-direction:column;min-width:0;min-height:0;font-family:Consolas,"Microsoft JhengHei",monospace;font-size:12px}
 .qp-head{display:flex;align-items:center;gap:8px;padding:2px 6px;background:#111;border-bottom:1px solid #333}

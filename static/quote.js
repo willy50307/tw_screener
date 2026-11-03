@@ -1,10 +1,13 @@
-// ---------- 即時報價（大分頁）：自選股、四格看盤、錄影重播（小分頁）----------
-// 資料來自群益 API（capital.py）：四格看盤每格有五檔、即時明細、盤中走勢圖；錄影 = 把逐筆和五檔變化存檔，盤後在「錄影重播」播放。
-const Q_SUBS = [["watch", "⭐ 自選股", "存關注的股票，看即時報價"], ["board", "🔲 四格看盤", "四檔同時看五檔、即時明細、走勢圖，可以錄影"],
-                ["replay", "⏯ 錄影重播", "盤後重播錄下來的四格看盤"]];
+// ---------- 即時報價（大分頁）：自選股、五格看盤、錄影重播（小分頁）----------
+// 資料來自群益 API（capital.py）：五格看盤每格有五檔、即時明細、盤中走勢圖；錄影 = 把逐筆和五檔變化存檔，盤後在「錄影重播」播放。
+// 版面（2026-11-03）：五格直式並排，每格由上而下 = 小走勢圖 → 統計 → 五檔 → 長長的即時明細；組別切換、播放控制都放在最上面那列。
+const Q_SUBS = [["watch", "⭐ 自選股", "存關注的股票，看即時報價"], ["board", "🔲 五格看盤", "五檔並排看五檔、即時明細、走勢圖，可以錄影"],
+                ["replay", "⏯ 錄影重播", "盤後重播錄下來的五格看盤"]];
 let qSub = (() => { const u = new URLSearchParams(location.search).get("sub"); if (u) return u;
   try { return localStorage.getItem("qSub") || "watch"; } catch(e) { return "watch"; } })();
-let qTimer = null, qPanes = [null, null, null, null], qCharts = [null, null, null, null];
+const Q_N = 5, Q_SLOTS = Q_N * 2;   // 每組 5 格，A、B 兩組共 10 格
+const Q_TK = 300;                   // 即時明細最多顯示幾筆（可以往上捲看更早的）
+let qTimer = null, qCharts = Array(Q_N).fill(null);
 let qRep = null;   // 重播：{name, meta, events, t0, t1, t, playing, speed}
 
 const qHM = (t, sec) => { const d = new Date(t * 1000), p = n => String(n).padStart(2, "0");
@@ -28,7 +31,8 @@ function qShow(){
   $("qGridMenu").innerHTML = Q_SUBS.map(([k, n, d]) => `<div class="q-tile ${k === qSub ? "on" : ""}" data-k="${k}"><b>${n}</b><span>${d}</span></div>`).join("");
   $("qGridMenu").querySelectorAll(".q-tile").forEach(t => t.onclick = () => qGo(t.dataset.k));
   $("qRecBtn").style.display = qSub === "board" ? "" : "none";
-  qCharts.forEach(c => c && c.chart.remove()); qCharts = [null, null, null, null];
+  $("qHeadCtl").innerHTML = "";
+  qCharts.forEach(c => c && c.chart.remove()); qCharts = Array(Q_N).fill(null);
   if (qSub === "watch") qWatch();
   else if (qSub === "board") qBoardInit();
   else qReplayList();
@@ -50,7 +54,7 @@ async function qWatch(){
     body.innerHTML = `<div class="qw-bar"><input id="qwAdd" placeholder="輸入代號加入自選（Enter），可一次貼多檔用空白隔開" autocomplete="off">
       <span class="k" id="qwSrc"></span></div>
       <table class="qw" id="qwTable"><thead><tr><th>代號</th><th>名稱</th><th>成交</th><th>漲跌</th><th>漲跌%</th><th>開</th><th>高</th><th>低</th><th>量(張)</th><th>時間</th><th></th></tr></thead><tbody></tbody></table>
-      <div class="k" style="margin-top:6px">點名稱放進四格看盤（A、B 兩組共 8 格，放到第一個空格，都滿了就換掉 A 組第 1 格）；按 ✕ 移除。</div>`;
+      <div class="k" style="margin-top:6px">點名稱放進五格看盤（A、B 兩組共 10 格，放到第一個空格，都滿了就換掉 A 組第 1 格）；按 ✕ 移除。</div>`;
     $("qwAdd").onkeydown = async e => {
       if (e.key !== "Enter") return;
       const add = e.target.value.split(/[\s,，]+/).filter(Boolean);
@@ -79,28 +83,31 @@ async function qWatch(){
     let i = codes.indexOf(a.dataset.c);
     if (i < 0) { i = codes.indexOf("") >= 0 ? codes.indexOf("") : 0; codes[i] = a.dataset.c; }
     S.settings.rt_board = codes;
-    qGrp = i >= 4 ? 1 : 0; try { localStorage.setItem("qGrp", qGrp); } catch(e) {}
+    qGrp = i >= Q_N ? 1 : 0; try { localStorage.setItem("qGrp", qGrp); } catch(e) {}
     qGo("board");
   });
   if (qVisible() && qSub === "watch") qTimer = setTimeout(qWatch, 3000);
 }
 
-// ===== 四格看盤（A、B 兩組，共 8 檔；兩組都會訂閱、錄影時一起錄）=====
-const qBoardCodes = () => [...((S && S.settings.rt_board) || []), ...Array(8).fill("")].slice(0, 8);
+// ===== 五格看盤（A、B 兩組，共 10 檔；兩組都會訂閱、錄影時一起錄）=====
+// 舊版是每組 4 格共 8 格（A 0~3、B 4~7），換成每組 5 格：A 組第 5 格、B 組第 5 格補空白
+const qSlots5 = a => (a || []).length === 8 ? [...a.slice(0, 4), "", ...a.slice(4, 8), ""] : a || [];
+const qBoardCodes = () => [...qSlots5(S && S.settings.rt_board), ...Array(Q_SLOTS).fill("")].slice(0, Q_SLOTS);
 let qGrp = (() => { try { return +localStorage.getItem("qGrp") || 0; } catch(e) { return 0; } })();
 
 // A／B 組切換按鈕：每組顯示裡面的股票代號
 function qGrpHTML(slots, cur, id){
   return `<div class="q-grp" id="${id}">` + [0, 1].map(g => {
-    const cs = slots.slice(g * 4, g * 4 + 4).filter(Boolean);
+    const cs = slots.slice(g * Q_N, g * Q_N + Q_N).filter(Boolean);
     return `<button class="btn ${g === cur ? "" : "ghost"}" data-g="${g}">${"AB"[g]} 組 <span class="k">${cs.join("、") || "（空）"}</span></button>`;
   }).join("") + `</div>`;
 }
 
 function qBoardInit(){
-  const codes = qBoardCodes(), mine = codes.slice(qGrp * 4, qGrp * 4 + 4);
-  qCharts.forEach(c => c && c.chart.remove()); qCharts = [null, null, null, null];
-  $("qBody").innerHTML = qGrpHTML(codes, qGrp, "qbGrp") + `<div class="qb-msg k" id="qbMsg"></div><div class="qb" id="qb">` +
+  const codes = qBoardCodes(), mine = codes.slice(qGrp * Q_N, qGrp * Q_N + Q_N);
+  qCharts.forEach(c => c && c.chart.remove()); qCharts = Array(Q_N).fill(null);
+  $("qHeadCtl").innerHTML = qGrpHTML(codes, qGrp, "qbGrp");   // 組別切換放在最上面那列，省下高度給明細
+  $("qBody").innerHTML = `<div class="qb-msg k" id="qbMsg"></div><div class="qb qb5" id="qb">` +
     mine.map((c, i) => qPaneHTML(i, c)).join("") + `</div>`;
   $("qbGrp").querySelectorAll("[data-g]").forEach(b => b.onclick = () => {
     qGrp = +b.dataset.g; try { localStorage.setItem("qGrp", qGrp); } catch(e) {} qBoardInit();
@@ -109,7 +116,7 @@ function qBoardInit(){
     const inp = $("qbIn" + i);
     inp.onkeydown = e => {
       if (e.key !== "Enter") return;
-      const cs = qBoardCodes(); cs[qGrp * 4 + i] = inp.value.trim(); S.settings.rt_board = cs;
+      const cs = qBoardCodes(); cs[qGrp * Q_N + i] = inp.value.trim(); S.settings.rt_board = cs;
       qBoardInit();
     };
   });
@@ -119,7 +126,7 @@ function qBoardInit(){
 function qPaneHTML(i, code, ro){
   return `<div class="qp" id="qp${i}">
     <div class="qp-head"><input id="qbIn${i}" value="${code || ""}" placeholder="代號" ${ro ? "readonly" : ""}><span class="qp-name" id="qpName${i}"></span>
-      <span class="qp-px" id="qpPx${i}"></span>${qKBtnHTML()}</div>
+      <span class="qp-px" id="qpPx${i}"></span>${qKBtnHTML(i)}</div>
     <div class="qp-main"><div class="qp-chart" id="qpChart${i}"></div>
       <div class="qp-side"><table class="qp-st" id="qpSt${i}"></table><div class="qp-io" id="qpIo${i}"></div>
         <table class="qp-b5" id="qpB5${i}"></table><div class="qp-ticks" id="qpTk${i}"></div></div></div></div>`;
@@ -146,7 +153,7 @@ async function qBoardTick(){
   try { j = await api("/api/rt/board?grp=" + qGrp + "&codes=" + qBoardCodes().join(",")); } catch(e) { qTimer = setTimeout(qBoardTick, 3000); return; }
   qRecShow(j.rec);
   if (!j.ready) {
-    $("qbMsg").innerHTML = `群益 API 沒有連線（${j.msg}）。四格看盤需要群益的五檔和逐筆，請按上面的「群益 API」開關。`;
+    $("qbMsg").innerHTML = `群益 API 沒有連線（${j.msg}）。五格看盤需要群益的五檔和逐筆，請按上面的「群益 API」開關。`;
     qTimer = setTimeout(qBoardTick, 3000);
     return;
   }
@@ -197,17 +204,23 @@ function qPaneDraw(i, p){
   // 即時明細：時間、買進、賣出、成交、單量、總量（最新在最下面，跟超級贏家一樣）
   // 內外盤：成交在賣價（或更高）= 外盤（買方主動，紅），成交在買價（或更低）= 內盤（賣方主動，綠）
   const side = t => t[4] > 0 && t[1] >= t[4] ? ["外", "io-o"] : t[3] > 0 && t[1] <= t[3] ? ["內", "io-i"] : ["", ""];
-  $("qpTk" + i).innerHTML = `<table><tr><th>時間</th><th>買進</th><th>賣出</th><th>成交</th><th>單量</th><th>總量</th></tr>` +
-    p.ticks.slice(-40).map(t => { const sc = side(t)[1];
+  const tkHTML = `<table><tr><th>時間</th><th>買進</th><th>賣出</th><th>成交</th><th>單量</th><th>總量</th></tr>` +
+    p.ticks.slice(-Q_TK).map(t => { const sc = side(t)[1];
       return `<tr><td>${qHM(t[0], true)}</td><td class="${c(t[3])}">${t[3] ? qNum(t[3]) : ""}</td><td class="${c(t[4])}">${t[4] ? qNum(t[4]) : ""}</td>
       <td class="${c(t[1])}">${qNum(t[1])}</td><td class="${sc || "yel"}">${t[2]}</td><td>${t[6] ?? ""}</td></tr>`; }).join("") + `</table>`;
-  const tk = $("qpTk" + i); tk.scrollTop = tk.scrollHeight;
+  // 原本就在最下面才自動捲到最新；往上捲在看舊的明細時不要被拉回去
+  const tk = $("qpTk" + i), atEnd = tk.dataset.code !== p.code || tk.scrollHeight - tk.scrollTop - tk.clientHeight < 24;
+  tk.innerHTML = tkHTML; tk.dataset.code = p.code;
+  if (atEnd) tk.scrollTop = tk.scrollHeight;
   qChartDraw(i, p.code, ref, p.bars, p.histq);
 }
 
 // 走勢圖模式：走勢（1 分鐘收盤連線）／1分K／5分K（今天的逐筆組成）／60分K、日K、週K、月K（歷史從 /api/fut/hist 拿，今天這根用即時 1 分K 接上）。
-// 所有格子共用（四格看盤、錄影重播、看盤），記在瀏覽器
+// 所有格子共用（五格看盤、錄影重播、看盤），記在瀏覽器
 let qKMode = (() => { try { return localStorage.getItem("qKMode") || "line"; } catch(e) { return "line"; } })();
+// 五格看盤／錄影重播另外記一份，預設 5分K（格子編號 0~4；看盤頁那格是 8，用上面的 qKMode）
+let qKMode5 = (() => { try { return localStorage.getItem("qKMode5") || "5"; } catch(e) { return "5"; } })();
+const qKM = i => i < Q_N ? qKMode5 : qKMode;
 const Q_KMODES = [["line", "走勢"], ["1", "1分K"], ["5", "5分K"], ["60", "60分K"], ["D", "日K"], ["W", "週K"], ["M", "月K"]];
 const Q_HIST = ["60", "D", "W", "M"];
 const qHistCache = {};   // "查詢字串|週期" -> {t, bars, last_date, note, error, loading}
@@ -246,14 +259,17 @@ function qMergeToday(hist, today, tf, lastDate){
   else out.push(t);
   return out;
 }
-function qKBtnHTML(){
-  return `<span class="qp-kbtn">${Q_KMODES.map(([k, n]) => `<button data-km="${k}" class="${k === qKMode ? "on" : ""}">${n}</button>`).join("")}</span>`;
+function qKBtnHTML(i){
+  const m = qKM(i);
+  return `<span class="qp-kbtn" data-five="${i < Q_N ? 1 : ""}">${Q_KMODES.map(([k, n]) => `<button data-km="${k}" class="${k === m ? "on" : ""}">${n}</button>`).join("")}</span>`;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest(".qp-kbtn [data-km]");
   if (!b) return;
-  qKMode = b.dataset.km; try { localStorage.setItem("qKMode", qKMode); } catch(err) {}
-  document.querySelectorAll(".qp-kbtn [data-km]").forEach(x => x.classList.toggle("on", x.dataset.km === qKMode));
+  const five = !!b.parentElement.dataset.five, sel = `.qp-kbtn[data-five="${five ? 1 : ""}"] [data-km]`;
+  if (five) { qKMode5 = b.dataset.km; try { localStorage.setItem("qKMode5", qKMode5); } catch(err) {} }
+  else { qKMode = b.dataset.km; try { localStorage.setItem("qKMode", qKMode); } catch(err) {} }
+  document.querySelectorAll(sel).forEach(x => x.classList.toggle("on", x.dataset.km === b.dataset.km));
   qCharts.forEach((c, k) => { if (c) { c.chart.remove(); qCharts[k] = null; } });   // 下一次更新（1 秒內）用新模式重畫
   if (qRep && !qRep.playing && qSub === "replay" && window.CUR_PAGE === "quote") qRepRender();
 });
@@ -272,6 +288,7 @@ function qBarsN(bars, n){
 function qChartDraw(i, code, ref, bars, histq){
   const el = $("qpChart" + i);
   let c = qCharts[i];
+  const qKMode = qKM(i);   // 這格用哪個模式（五格看盤跟看盤頁各記各的）
   if (c && (c.code !== code || c.mode !== qKMode)) { c.chart.remove(); c = qCharts[i] = null; }
   const kline = qKMode !== "line", hist = Q_HIST.includes(qKMode), daily = hist && qKMode !== "60";
   let h = null;
@@ -364,13 +381,14 @@ async function qReplayList(){
   const list = await api("/api/rt/recordings");
   const nm = r => r.codes.map(c => `${r.names[c] || ""}(${c})`).join("、");
   const when = n => `${n.slice(4, 6)}/${n.slice(6, 8)} ${n.slice(9, 11)}:${n.slice(11, 13)}:${n.slice(13, 15)}`;
-  $("qBody").innerHTML = `<div class="qw-bar"><select id="qrSel">${list.map(r => `<option value="${r.name}">${when(r.name)}　${nm(r)}　${(r.size / 1024).toFixed(0)}KB</option>`).join("")}</select>
-    <button class="btn" id="qrLoad">載入</button><span class="k">${list.length ? "" : "還沒有錄影：到「🔲 四格看盤」按 ● 錄影"}</span></div>
-    <div class="qr-ctl" id="qrCtl" style="display:none">
+  // 選錄影、播放、倍速、時間軸、組別全部放在最上面那列（跟標題同一列），下面整個高度給五格
+  $("qHeadCtl").innerHTML = `<div class="qr-ctl"><select id="qrSel" title="選一段錄影">${list.map(r => `<option value="${r.name}">${when(r.name)}　${nm(r)}　${(r.size / 1024).toFixed(0)}KB</option>`).join("")}</select>
+    <button class="btn ghost" id="qrLoad">載入</button><span class="k">${list.length ? "" : "還沒有錄影：到「🔲 五格看盤」按 ● 錄影"}</span>
+    <span class="qr-play" id="qrCtl" style="display:none">
       <button class="btn" id="qrPlay">▶ 播放</button>
       <select id="qrSpeed"><option value="1">1 倍速</option><option value="5">5 倍速</option><option value="20" selected>20 倍速</option><option value="60">60 倍速</option></select>
-      <input type="range" id="qrSlider" min="0" max="1" value="0"><b id="qrTime"></b><span id="qrGrp"></span></div>
-    <div class="qb" id="qb"></div>`;
+      <input type="range" id="qrSlider" min="0" max="1" value="0"><b id="qrTime"></b><span id="qrGrp"></span></span></div>`;
+  $("qBody").innerHTML = `<div class="qb qb5" id="qb"></div>`;
   if (!list.length) return;
   $("qrLoad").onclick = () => qRepLoad($("qrSel").value);
   qRepLoad(list[0].name);
@@ -379,7 +397,8 @@ async function qRepLoad(name){
   const ev = await api("/api/rt/recording/" + name);
   const meta = ev.find(e => e.k === "meta"), live = ev.filter(e => e.k === "t" || e.k === "b");
   const t0 = meta.t, t1 = live.reduce((m, e) => Math.max(m, e.t), t0 + 1);   // 不用 Math.max(...)：筆數太多會爆
-  const slots = [...(meta.slots || meta.codes), ...Array(8).fill("")].slice(0, 8);   // 舊錄影沒有 slots，只有 A 組
+  // 舊錄影沒有 slots（只有 A 組）；每組 4 格的錄影換成每組 5 格的位置
+  const slots = [...qSlots5(meta.slots || meta.codes), ...Array(Q_SLOTS).fill("")].slice(0, Q_SLOTS);
   qRep = {name, meta, ev, slots, t0, t1, t: t0, playing: false, speed: 20, grp: 0};
   qRepPanes();
   $("qrCtl").style.display = "";
@@ -389,12 +408,12 @@ async function qRepLoad(name){
   $("qrSpeed").onchange = e => qRep.speed = +e.target.value;
   qRepRender();
 }
-// 重播時切換 A／B 組：重建四格，時間軸不動
+// 重播時切換 A／B 組：重建五格，時間軸不動
 function qRepPanes(){
   const {slots, grp} = qRep;
-  qCharts.forEach(c => c && c.chart.remove()); qCharts = [null, null, null, null];
-  $("qb").innerHTML = [0, 1, 2, 3].map(i => qPaneHTML(i, slots[grp * 4 + i], true)).join("");
-  $("qrGrp").innerHTML = slots.slice(4).some(Boolean) ? qGrpHTML(slots, grp, "qrGrpBtns") : "";
+  qCharts.forEach(c => c && c.chart.remove()); qCharts = Array(Q_N).fill(null);
+  $("qb").innerHTML = [...Array(Q_N).keys()].map(i => qPaneHTML(i, slots[grp * Q_N + i], true)).join("");
+  $("qrGrp").innerHTML = slots.slice(Q_N).some(Boolean) ? qGrpHTML(slots, grp, "qrGrpBtns") : "";
   $("qrGrp").querySelectorAll("[data-g]").forEach(b => b.onclick = () => { qRep.grp = +b.dataset.g; qRepPanes(); qRepRender(); });
 }
 function qRepPlay(){
@@ -413,7 +432,7 @@ function qRepPause(){ if (!qRep) return; qRep.playing = false; clearTimeout(qRep
 function qRepRender(){
   const {meta, ev, t} = qRep;
   $("qrTime").textContent = qHM(Math.floor(t), true);
-  qRep.slots.slice(qRep.grp * 4, qRep.grp * 4 + 4).forEach((code, i) => {
+  qRep.slots.slice(qRep.grp * Q_N, qRep.grp * Q_N + Q_N).forEach((code, i) => {
     if (!code) return qPaneDraw(i, null);
     let ticks = [], best5 = null;
     for (const e of ev) {
@@ -431,7 +450,7 @@ function qRepRender(){
     const bars = Object.values(by).sort((a, b) => a[0] - b[0]).map(b => [...b.slice(0, 5), b[5]]);
     const [st, cum] = qTickStats(ticks);
     qPaneDraw(i, {code, name: meta.names[code], ref: meta.ref[code], q: null, best5, st,
-                  ticks: ticks.slice(-40).map((x, k) => [...x.slice(0, 6), cum[cum.length - Math.min(40, ticks.length) + k]]), bars});
+                  ticks: ticks.slice(-Q_TK).map((x, k) => [...x.slice(0, 6), cum[cum.length - Math.min(Q_TK, ticks.length) + k]]), bars});
   });
 }
 
