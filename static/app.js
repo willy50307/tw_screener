@@ -342,7 +342,7 @@ $("btnCapital").onclick = async () => {
   setTimeout(refreshCapital, 500);
 };
 refreshCapital();
-$("btnUpdate").onclick = async () => { await post("/api/update"); setTimeout(refreshState, 300); };
+$("btnUpdate").onclick = async () => { await post("/api/update"); setTimeout(refreshState, 300); if (window.waveLiveRefresh) window.waveLiveRefresh(); };   // 在波浪頁按：順便抓夜盤走勢重新分析細浪
 document.addEventListener("keydown", e => {
   if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || document.activeElement.tagName === "INPUT" || $("dlg").open) return;
   if (window.CUR_PAGE && window.CUR_PAGE !== "strategy") return;   // 其他頁（例如數據篩選）自己處理上下鍵

@@ -17,6 +17,7 @@ data/*
 !data/fut_groups.json
 !data/live_groups.json
 !data/limitup_stats.json
+!data/wave_scripts.json
 
 # 研究輸出（大型 pkl/csv 可重跑產生）
 research/out/

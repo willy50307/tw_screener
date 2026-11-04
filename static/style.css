@@ -849,3 +849,21 @@ table.ol-fair th{top:-10px;background:var(--panel);z-index:2;padding:4px}
 .bi-mid{position:absolute;left:50%;top:2px;bottom:2px;border-left:1px solid #434651}
 .bi-bar{position:absolute;top:4px;bottom:4px;opacity:.85}
 .up-bg{background:#f23645}.down-bg{background:#089981}
+/* 波浪頁：最新波浪／細浪、主劇本、細浪紀錄 */
+.wl-box{border-color:#ffd600}
+.wl-box > .lu-title{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.wl-row .lu-box{background:var(--bg)}
+.wl-row ul{margin:4px 0;padding-left:18px}.wl-row li{margin:2px 0}
+.wl-long{border-color:#f23645}.wl-short{border-color:#089981}
+.wl-lv{margin-top:6px}
+.wl-fold{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:10px}
+.wl-in{margin-top:8px}
+.wl-pick{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.wl-pick select{max-width:100%}
+.wl-meta{color:var(--muted);font-size:12px;margin-bottom:4px}
+.wl-chg{color:var(--yellow);margin-top:2px}
+.wl-kv{margin:3px 0}
+.wl-form{display:flex;flex-direction:column;gap:6px;margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.wl-form label{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:12px}
+.wl-form input,.wl-form textarea,.wl-form select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit}
+.wl-f2{display:flex;gap:8px;flex-wrap:wrap}.wl-f2 label{flex:1;min-width:120px}

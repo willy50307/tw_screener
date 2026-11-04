@@ -18,6 +18,7 @@ import broker
 import capital
 import market_brief
 import waves
+import wavelive
 import settlement
 import settle_tail
 import warrants
@@ -881,6 +882,40 @@ def waves_get():
     except Exception as e:
         traceback.print_exc()
         return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+# ---------- 波浪頁上方：最新波浪／細浪、主劇本、細浪紀錄（wavelive.py）----------
+
+@app.get("/api/wave_live")
+def wave_live_get():
+    """force=1：按「更新資料」或「重新分析」時，重抓夜盤／盤中走勢再算"""
+    try:
+        return jsonify(wavelive.get(force=request.args.get("force") == "1"))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/wave_scripts")
+def wave_scripts_get():
+    return jsonify(wavelive.scripts())
+
+
+@app.post("/api/wave_scripts")
+def wave_scripts_post():
+    b = request.get_json(force=True) or {}
+    if len(b.get("pivots") or []) < 2:
+        return jsonify(error="轉折點至少要兩個")
+    try:
+        return jsonify(wavelive.save_script(b))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/wave_subs")
+def wave_subs_get():
+    return jsonify(wavelive.subs())
 
 
 _setl_cache = {"key": None, "data": None}

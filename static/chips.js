@@ -575,7 +575,7 @@ async function waveShow(){
   if (W.error || !W.daily) { $("chBody").innerHTML = `<div class="k" style="padding:20px">${W.error || "資料不足"}</div>`; return; }
   $("chDate").innerHTML = `<option>${W.daily.last.date}</option>`;
   const T = W.text, ul = a => `<ul>${(a || []).map(x => `<li>${x}</li>`).join("")}</ul>`;
-  $("chBody").innerHTML = `
+  $("chBody").innerHTML = wlHtml() + `
     <div class="lu-box brief-sum"><div class="lu-title">🌊 波浪理論：台指期現在在哪個位置？（${W.daily.last.date}）</div>
       <div class="lu-guide">${ul(T.summary)}</div></div>
     <div class="lu-box"><div class="lu-title">日K（全盤，近月連續）
@@ -592,6 +592,7 @@ async function waveShow(){
       <div class="lu-box grow"><div class="lu-title">⚠ 注意</div>${ul(T.notes)}</div></div>`;
   document.querySelectorAll("#chBody [data-wa]").forEach(b => b.onclick = () => { waveAlt = b.dataset.wa === "1"; waveShow(); });
   waveCharts();
+  waveLive(false);
 }
 
 function waveChart(el, bars, intra){
@@ -646,6 +647,148 @@ function waveCharts(){
     const fitH = () => chh.timeScale().setVisibleLogicalRange({from: i0, to: m + 3});
     fitH(); [80, 400].forEach(ms => setTimeout(fitH, ms));
   }
+}
+
+// ---------- 🌊 波浪：上方「最新波浪／細浪」＋主劇本／細浪紀錄（wavelive.py）----------
+let WL = null, WL_SCR = null, WL_SUBS = null, WL_CH = null, wlScrSel = null, wlSubSel = null;
+const wlUl = a => `<ul>${(a || []).map(x => `<li>${x}</li>`).join("")}</ul>`;
+const wlEsc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function wlHtml(){
+  return `<div class="lu-box wl-box" id="wlBox"><div class="k" style="padding:6px">分析最新走勢中…</div></div>
+    <details class="st-fold wl-fold" id="wlScrFold"><summary>📜 主劇本（依日期）</summary><div id="wlScr" class="wl-in"></div></details>
+    <details class="st-fold wl-fold" id="wlSubFold"><summary>🔍 細浪紀錄（依日期）</summary><div id="wlSub" class="wl-in"></div></details>`;
+}
+
+async function waveLive(force){
+  if (chTab !== "wave" || !$("wlBox")) return;
+  if (force) { WL = null; $("wlBox").innerHTML = `<div class="k" style="padding:6px">抓最新走勢（含夜盤）重新分析中…</div>`; }
+  try {
+    if (!WL) WL = await api("/api/wave_live" + (force ? "?force=1" : ""));
+    [WL_SCR, WL_SUBS] = await Promise.all([api("/api/wave_scripts"), api("/api/wave_subs")]);
+  } catch(e) { if ($("wlBox")) $("wlBox").innerHTML = `<div class="k">最新波浪載入失敗：${e}</div>`; return; }
+  if (chTab !== "wave" || !$("wlBox")) return;
+  wlRender(); wlScrRender(); wlSubRender();
+}
+window.waveLiveRefresh = () => { if (window.CUR_PAGE === "chips" && chTab === "wave") waveLive(true); };
+
+function wlCells(x){
+  return `<div class="lu-row wl-row">
+      <div class="lu-box grow"><div class="lu-title">🌊 細浪計數</div>${wlUl(x.count)}</div>
+      <div class="lu-box grow"><div class="lu-title">👀 看法</div>${wlUl(x.view)}</div>
+      <div class="lu-box grow wl-long"><div class="lu-title">📈 做多建議</div>${wlUl(x.long)}</div>
+      <div class="lu-box grow wl-short"><div class="lu-title">📉 做空建議</div>${wlUl(x.short)}</div></div>
+    <div class="k wl-lv">關鍵價：${(x.levels || []).join("　")}</div>`;
+}
+
+function wlRender(){
+  const el = $("wlBox"), x = WL;
+  if (!el) return;
+  if (!x || x.error) { el.innerHTML = `<div class="lu-title">⚡ 最新波浪／細浪</div><div class="k">${x ? x.error : ""}</div>`; return; }
+  el.innerHTML = `<div class="lu-title">⚡ 最新波浪／細浪　<span class="${x.broke_inv ? "up" : ""}">${x.now}</span>
+      <span class="k" style="margin-left:8px">${x.date} ${x.session} ${x.time} 分析｜最新 ${fmt(x.price, 0)}（${x.asof}）｜資料庫到 ${x.db_to}${x.src ? "，之後用" + x.src : "（沒有即時走勢：群益沒開或期交所連不上）"}</span>
+      <button class="btn ghost" id="wlRe" style="margin-left:auto">🔄 抓最新走勢重新分析</button></div>
+    ${wlCells(x)}
+    <div class="k" style="margin:6px 0 2px">5 分K（${x.pivots[0].label} 之後；黃＝細浪、紫＝轉折、灰虛線＝${x.pivots[0].label}→${x.pivots[1].label} 的回檔、紅＝失效價）</div>
+    <div id="waveL" style="height:340px"></div>`;
+  $("wlRe").onclick = () => waveLive(true);
+  wlChart();
+}
+
+function wlChart(){
+  if (WL_CH) { try { WL_CH.remove(); } catch(e) {} WL_CH = null; }
+  const x = WL, el = $("waveL"); if (!el || !x.bars || !x.bars.length) return;
+  const {ch, k} = waveChart(el, x.bars, true);
+  WL_CH = ch; WAVE_CH = WAVE_CH.filter(c => c !== ch);
+  const mk = [];
+  const pmax = Math.max(...x.pivots.map(q => q.price));
+  x.pivots.forEach(p => mk.push({time: p.ts, position: p.price >= pmax ? "aboveBar" : "belowBar", color: "#ce93d8", shape: "circle", text: p.label}));
+  x.swings.slice(1).forEach((s, i, a) => {
+    const prev = i ? a[i - 1].price : x.swings[0].price, top = s.price > prev;
+    mk.push({time: s.ts, position: top ? "aboveBar" : "belowBar", color: "#ffd600", shape: top ? "arrowDown" : "arrowUp", text: s.label + (s.open ? "?" : "")});
+  });
+  const seen = new Set();
+  LW.createSeriesMarkers(k, mk.sort((a, b) => a.time - b.time).filter(m => { const key = m.time + m.text; if (seen.has(key)) return false; seen.add(key); return true; }));
+  ch.addSeries(LW.LineSeries, {color: "rgba(255,214,0,.7)", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false})
+    .setData(x.swings.map(s => ({time: s.ts, value: s.price})).filter((p, i, a) => !i || p.time > a[i - 1].time));
+  x.fibs.filter(f => f.r >= 0.236 && f.r <= 0.618).forEach(f => k.createPriceLine({price: f.price, color: "#90a4ae", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: `${(f.r * 100).toFixed(1)}%`}));
+  if (x.invalid) k.createPriceLine({price: x.invalid, color: "#f23645", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "失效價"});
+  const n = x.bars.length, fit = () => ch.timeScale().setVisibleLogicalRange({from: Math.max(0, n - 260), to: n + 4});
+  fit(); [80, 400].forEach(ms => setTimeout(fit, ms));
+}
+
+function wlScrBody(s){
+  const pv = (s.pivots || []).map(p => `${p.label} <b>${fmt(p.price, 0)}</b>（${p.t}）`).join(" → ");
+  const alt = s.alt || {};
+  return `<div class="wl-meta">${s.date} ${s.time || ""}｜${s.author || ""}${s.change ? `<div class="wl-chg">🔁 改版原因：${s.change}</div>` : ""}</div>
+    <div class="lu-title">${s.title || ""}</div>${wlUl(s.big)}
+    <div class="wl-kv"><b>轉折點：</b>${pv}</div>
+    <div class="wl-kv"><b>現在：</b>${s.now || ""}（${s.now_dir === "up" ? "往上" : "往下"}）　<b>下一步：</b>${s.next || ""}</div>
+    ${s.invalid ? `<div class="wl-kv"><b>失效價：</b><span class="up">${fmt(s.invalid.price, 0)}</span>（${s.invalid.dir === "below" ? "跌破" : "突破"}）${s.invalid.why || ""}</div>` : ""}
+    ${(s.targets || []).length ? `<div class="wl-kv"><b>目標：</b>${s.targets.map(t => `${fmt(t.price, 0)}（${t.label || ""}）`).join("、")}</div>` : ""}
+    ${(s.zones || []).length ? `<div class="wl-kv"><b>區間：</b>${s.zones.map(z => `${fmt(z.lo, 0)}~${fmt(z.hi, 0)}（${z.label || ""}）`).join("、")}</div>` : ""}
+    ${alt.title ? `<div class="lu-title" style="margin-top:6px">🔀 備選劇本：${alt.title}</div>${wlUl(alt.lines)}` : ""}`;
+}
+
+function wlScrRender(){
+  const el = $("wlScr"); if (!el) return;
+  const L = WL_SCR || [];
+  if (!L.length) { el.innerHTML = `<div class="k">還沒有主劇本</div>`; return; }
+  const cur = L[L.length - 1];
+  $("wlScrFold").querySelector("summary").innerHTML = `📜 主劇本（目前：${cur.date} 版｜${cur.title || ""}｜共 ${L.length} 版）`;
+  if (wlScrSel == null || wlScrSel >= L.length) wlScrSel = L.length - 1;
+  el.innerHTML = `<div class="wl-pick">版本：<select id="wlScrPick">${L.map((s, i) => `<option value="${i}" ${i === wlScrSel ? "selected" : ""}>${s.date} ${s.time || ""}｜${wlEsc(s.title)}${i === L.length - 1 ? "（目前）" : ""}</option>`).reverse().join("")}</select>
+      <button class="btn ghost" id="wlScrEdit">✏ 以這版為底、新增今天的版本</button></div>
+    <div id="wlScrView">${wlScrBody(L[wlScrSel])}</div><div id="wlScrForm"></div>`;
+  $("wlScrPick").onchange = e => { wlScrSel = +e.target.value; $("wlScrView").innerHTML = wlScrBody(L[wlScrSel]); };
+  $("wlScrEdit").onclick = () => wlScrForm(L[wlScrSel]);
+}
+
+function wlScrForm(s){
+  const pv = (s.pivots || []).map(p => `${p.label},${p.price},${p.t}`).join("\n");
+  $("wlScrForm").innerHTML = `<div class="wl-form">
+    <label>標題 <input id="wfTitle" value="${wlEsc(s.title)}"></label>
+    <label>改版原因 <input id="wfChg" placeholder="例如：今天日盤 V 轉，C-4 提早展開"></label>
+    <label>大架構說明（一行一點）<textarea id="wfBig" rows="5">${wlEsc((s.big || []).join("\n"))}</textarea></label>
+    <label>已確認轉折點（一行一個：名稱,價位,日期 時間）<textarea id="wfPv" rows="5">${wlEsc(pv)}</textarea></label>
+    <div class="wl-f2"><label>現在第幾浪 <input id="wfNow" value="${wlEsc(s.now)}"></label>
+      <label>方向 <select id="wfDir"><option value="up" ${s.now_dir === "up" ? "selected" : ""}>往上</option><option value="down" ${s.now_dir !== "up" ? "selected" : ""}>往下</option></select></label>
+      <label>大方向 <select id="wfTrend"><option value="down" ${s.trend !== "up" ? "selected" : ""}>空（下跌浪）</option><option value="up" ${s.trend === "up" ? "selected" : ""}>多（上漲浪）</option></select></label>
+      <label>下一浪 <input id="wfNext" value="${wlEsc(s.next)}"></label>
+      <label>失效價 <input id="wfInv" type="number" value="${s.invalid ? s.invalid.price : ""}"></label>
+      <label>失效方向 <select id="wfInvDir"><option value="above" ${!s.invalid || s.invalid.dir !== "below" ? "selected" : ""}>突破</option><option value="below" ${s.invalid && s.invalid.dir === "below" ? "selected" : ""}>跌破</option></select></label></div>
+    <label>失效原因 <input id="wfInvWhy" value="${wlEsc(s.invalid && s.invalid.why)}"></label>
+    <div><button class="btn" id="wfSave">💾 存成今天的主劇本</button> <button class="btn ghost" id="wfCancel">取消</button> <span class="k" id="wfMsg"></span></div></div>`;
+  $("wfCancel").onclick = () => { $("wlScrForm").innerHTML = ""; };
+  $("wfSave").onclick = async () => {
+    const pivots = $("wfPv").value.split("\n").map(l => l.split(",").map(x => x.trim())).filter(a => a.length >= 3 && +a[1])
+      .map(([label, price, t]) => ({label, price: +price, t}));
+    if (pivots.length < 2) { $("wfMsg").textContent = "轉折點至少要兩個"; return; }
+    const inv = +$("wfInv").value;
+    const body = Object.assign({}, s, {title: $("wfTitle").value, change: $("wfChg").value, big: $("wfBig").value.split("\n").filter(x => x.trim()),
+      pivots, now: $("wfNow").value, now_dir: $("wfDir").value, trend: $("wfTrend").value, next: $("wfNext").value,
+      invalid: inv ? {price: inv, dir: $("wfInvDir").value, why: $("wfInvWhy").value} : null, author: "willy"});
+    delete body.date; delete body.time;
+    const r = await post("/api/wave_scripts", body);
+    if (r.error) { $("wfMsg").textContent = r.error; return; }
+    wlScrSel = null; waveLive(true);
+  };
+}
+
+function wlSubRender(){
+  const el = $("wlSub"); if (!el) return;
+  const L = WL_SUBS || [];
+  if (!L.length) { el.innerHTML = `<div class="k">還沒有紀錄</div>`; return; }
+  $("wlSubFold").querySelector("summary").innerHTML = `🔍 細浪紀錄（最新：${L[L.length - 1].date} ${L[L.length - 1].session}｜共 ${L.length} 筆）`;
+  if (wlSubSel == null || wlSubSel >= L.length) wlSubSel = L.length - 1;
+  const lab = s => `${s.date} ${s.session} ${s.time}${s.author && s.author !== "auto" ? "｜" + s.author : ""}｜${s.now || ""} ${s.price ? fmt(s.price, 0) : ""}`;
+  el.innerHTML = `<div class="wl-pick">紀錄：<select id="wlSubPick">${L.map((s, i) => `<option value="${i}" ${i === wlSubSel ? "selected" : ""}>${wlEsc(lab(s))}</option>`).reverse().join("")}</select></div>
+    <div id="wlSubView"></div>`;
+  const show = () => { const s = L[wlSubSel];
+    $("wlSubView").innerHTML = `<div class="wl-meta">${s.date} ${s.session} ${s.time} 分析｜${s.author === "auto" || !s.author ? "程式自動" : s.author}｜資料到 ${s.asof || ""}｜依主劇本 ${s.script_date || ""} 版</div>
+      ${s.note ? `<div class="wl-kv">${s.note}</div>` : ""}${wlCells(s)}`; };
+  $("wlSubPick").onchange = e => { wlSubSel = +e.target.value; show(); };
+  show();
 }
 
 
