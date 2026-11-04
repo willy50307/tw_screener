@@ -841,3 +841,11 @@ table.ol-fair th{top:-10px;background:var(--panel);z-index:2;padding:4px}
 .br-inst{margin-bottom:8px}
 .br-inst-sum td{border-top:1px solid #434651}
 .br-inst-none{margin-bottom:6px}
+.br-inst-t [data-w]{cursor:pointer}
+.br-inst-t th[data-w]:hover,.br-inst-t td[data-w]:hover{background:rgba(41,98,255,.15)}
+.br-inst-t .on{background:rgba(41,98,255,.28)!important}
+.br-inst-hist{margin-top:6px;padding:6px;border:1px solid #2a2e39;border-radius:6px}
+.bi-cell{position:relative;min-width:80px}
+.bi-mid{position:absolute;left:50%;top:2px;bottom:2px;border-left:1px solid #434651}
+.bi-bar{position:absolute;top:4px;bottom:4px;opacity:.85}
+.up-bg{background:#f23645}.down-bg{background:#089981}

@@ -818,6 +818,26 @@ def broker_stock(code):
         return jsonify(error=f"{type(e).__name__}: {e}")
 
 
+@app.get("/api/inst/<code>")
+def inst_stock(code):
+    """某檔近 n 個交易日 三大法人每日買賣超（張）＋收盤價"""
+    try:
+        n = min(int(request.args.get("n") or 20), 120)
+        con = chips.connect()
+        end = request.args.get("end") or con.execute("SELECT MAX(date) FROM prices WHERE code='2330'").fetchone()[0]
+        td = broker._trade_days(con, end, n)
+        start = td[-1] if td else end
+        px = dict(con.execute("SELECT date, close FROM prices WHERE code=? AND date BETWEEN ? AND ?", (code, start, end)).fetchall())
+        con.close()
+        d = chips.stock_inst(code, start, end)
+        for x in d["days"]:
+            x["close"] = px.get(x["date"])
+        return jsonify(d)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
 @app.get("/api/mainforce/<code>")
 def mainforce(code):
     try:

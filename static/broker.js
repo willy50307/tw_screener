@@ -43,6 +43,7 @@ async function brShow(){
     <div class="k" style="margin-bottom:4px">前15大買超合計 <span class="up">${sb.toLocaleString()}</span>｜前15大賣超合計 <span class="down">${Math.abs(ss).toLocaleString()}</span>｜🎯＝隔日沖分點</div>
     ${tb(d.buy, true)}<div style="height:8px"></div>${tb(d.sell, false)}
     <div class="k" style="margin-top:6px">點任一分點，可以看他在這檔股票最近一年的每日買賣超。資料：富邦 e 點通，每天約傍晚更新。</div>`;
+  if (d.inst && d.inst.end) brInstBind(code, d.inst.end);
   document.querySelectorAll("#brBody .br-row").forEach(tr => tr.onclick = () => {
     const k = tr.dataset.i, r = (k[0] === "B" ? d.buy : d.sell)[+k.slice(1)];
     brOpen(code, name, r);
@@ -54,7 +55,7 @@ function brInstHtml(I, brDate){
   if (!I) return "";
   if (!I.days || !I.days.length) return `<div class="k br-inst-none">三大法人：資料庫沒有這檔的法人資料</div>`;
   const v = n => `<td class="${cls(n)}"><b>${n > 0 ? "+" : ""}${n.toLocaleString()}</b></td>`;
-  const row = (t, x, c) => `<tr${c ? ` class="${c}"` : ""}><td>${t}</td>${v(x.fi)}${v(x.it)}${v(x.dh)}${v(x.dp)}${v(x.tot)}</tr>`;
+  const row = (t, x, c) => `<tr${c ? ` class="${c}"` : ""}><td>${t}</td>${INST_W.map(([k]) => v(x[k]).replace("<td ", `<td data-w="${k}" `)).join("")}</tr>`;
   const md = s => s.slice(5).replace("-", "/");
   const many = I.days.length > 1;
   const body = many
@@ -62,7 +63,46 @@ function brInstHtml(I, brDate){
     : row(md(I.end), I.days[0]);
   const late = I.end !== brDate ? `<span class="down">（${md(brDate)} 法人尚未公布，顯示 ${md(I.end)}）</span>` : "";
   return `<div class="br-inst"><div class="k" style="margin-bottom:2px">三大法人買賣超｜單位：張${late}</div>
-    <table class="lu-t br-t"><tr><th>日期</th><th>外資</th><th>投信</th><th>自營避險</th><th>自營</th><th>合計</th></tr>${body}</table></div>`;
+    <table class="lu-t br-t br-inst-t"><tr><th>日期</th>${INST_W.map(([k, t]) => `<th data-w="${k}" title="點一下看${t}近20天買賣超">${t} ▾</th>`).join("")}</tr>${body}</table>
+    <div id="brInstHist"></div></div>`;
+}
+
+const INST_W = [["fi", "外資"], ["it", "投信"], ["dh", "自營避險"], ["dp", "自營"], ["tot", "合計"]];
+let BR_INST_W = null;
+// 點三大法人表的欄位：下方展開該法人近 20 天每日買賣超
+function brInstBind(code, end){
+  BR_INST_W = null;
+  document.querySelectorAll("#brBody .br-inst-t [data-w]").forEach(el => el.onclick = () => {
+    const w = el.dataset.w;
+    if (BR_INST_W === w) { BR_INST_W = null; $("brInstHist").innerHTML = ""; brInstMark(); return; }
+    BR_INST_W = w; brInstMark(); brInstHist(code, w, end);
+  });
+}
+function brInstMark(){
+  document.querySelectorAll("#brBody .br-inst-t [data-w]").forEach(el => el.classList.toggle("on", el.dataset.w === BR_INST_W));
+}
+async function brInstHist(code, w, end){
+  const box = $("brInstHist"), t = INST_W.find(x => x[0] === w)[1];
+  box.innerHTML = `<div class="k">查詢 ${t} 近20天…</div>`;
+  let d;
+  try { d = await api(`/api/inst/${code}?n=20&end=${end}`); } catch(e) { d = {error: "查詢失敗"}; }
+  if (BR_INST_W !== w || !$("brInstHist")) return;
+  if (d.error || !d.days || !d.days.length) { box.innerHTML = `<div class="k">${d.error || "沒有法人資料"}</div>`; return; }
+  const days = d.days, mx = Math.max(1, ...days.map(x => Math.abs(x[w])));
+  let cum = 0; const cums = days.map(x => cum += x[w]);
+  let streak = 0; const sg = Math.sign(days[days.length - 1][w]);
+  for (let i = days.length - 1; i >= 0 && sg && Math.sign(days[i][w]) === sg; i--) streak++;
+  const buyN = days.filter(x => x[w] > 0).length;
+  const sn = n => `${n > 0 ? "+" : ""}${n.toLocaleString()}`;
+  const rows = days.map((x, i) => ({x, c: cums[i]})).reverse().map(({x, c}) => {
+    const n = x[w], pct = Math.abs(n) / mx * 50;
+    const bar = n >= 0 ? `<span class="bi-bar up-bg" style="left:50%;width:${pct}%"></span>` : `<span class="bi-bar down-bg" style="right:50%;width:${pct}%"></span>`;
+    return `<tr><td>${x.date.slice(5).replace("-", "/")}</td><td>${x.close != null ? fmt(x.close) : "–"}</td><td class="${cls(n)}"><b>${sn(n)}</b></td>
+      <td class="bi-cell"><span class="bi-mid"></span>${bar}</td><td class="${cls(c)}">${sn(c)}</td></tr>`;
+  }).join("");
+  box.innerHTML = `<div class="br-inst-hist"><div class="br-title"><b>${t}</b> <span class="k">近 ${days.length} 個交易日｜單位：張</span></div>
+    <div class="k" style="margin-bottom:4px">合計 <b class="${cls(cums[cums.length - 1])}">${sn(cums[cums.length - 1])}</b>｜買超 ${buyN} 天、賣超 ${days.length - buyN} 天｜${sg ? `目前連${sg > 0 ? "買" : "賣"} ${streak} 天` : ""}</div>
+    <table class="lu-t br-t"><tr><th>日期</th><th>收盤</th><th>買賣超</th><th style="width:38%"></th><th>累計</th></tr>${rows}</table></div>`;
 }
 
 async function brOpen(code, name, r){
