@@ -7,6 +7,7 @@ import datetime as dt
 import io
 import json
 import os
+import re
 import threading
 import time
 
@@ -210,3 +211,55 @@ def _fallback(prev, sess):
                      "o": None, "h": None, "l": None, "v": 0, "yv": hit[0], "oi": None, "yoi": hit[1], "t": "",
                      "night": False, "day_only": False})
     return rows
+
+
+# ---------- 個股K 的台指期(TX)：接上還沒進資料庫的夜盤 ----------
+_txl = {"t": 0, "v": None}
+
+
+def _wd_back(d, include):
+    """d 當天（include）或之前最近的平日"""
+    if not include:
+        d -= dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d
+
+
+def _wd_next(d):
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return d
+
+
+def tx_live():
+    """台指期近月目前的行情（期交所 MIS，免費）。夜盤 15:00～隔天 05:00 歸屬下一個交易日（期交所規定），
+    所以夜盤這根的日期是下一個交易日；15:00 後資料庫還沒有今天日盤時也一併給今天日盤。
+    回傳 {"day": (日期, 開, 高, 低, 收, 口) 或 None, "night": (...) 或 None}；不是夜盤時段回 None。
+    國定假日沒有排除（日期可能標成假日，隔天期交所資料下載後就會被正確資料取代）"""
+    now = dt.datetime.now()
+    if _session() != "1" or dt.time(14, 50) <= now.time() < dt.time(15, 0):
+        return None
+    if time.time() - _txl["t"] < 20:
+        return _txl["v"]
+    _txl["t"] = time.time()
+    with _lock:
+        day = _mis("1", "0")[1]
+        night = _mis("1", "1")[1]
+    syms = [x["SymbolID"][:-2] for x in day if re.fullmatch(r"TXF[A-L]\d-F", x.get("SymbolID", ""))]
+    if not syms:
+        _txl["v"] = None
+        return None
+    near = min(syms, key=lambda s: _ym(s)[1])
+    anchor = _wd_back(now.date(), now.time() >= dt.time(15, 0))   # 今天日盤（下午）／昨天日盤（半夜、清晨）
+    target = _wd_next(anchor)
+
+    def bar(lst, sid, d):
+        x = next((x for x in lst if x.get("SymbolID") == sid), None)
+        o, h, l, c, v = (_f(x.get(k)) if x else None for k in ("COpenPrice", "CHighPrice", "CLowPrice", "CLastPrice", "CTotalVolume"))
+        return (d.isoformat(), o, h, l, c, v or 0) if o and h and l and c else None
+
+    _txl["v"] = {"day": bar(day, near + "-F", anchor) if anchor == now.date() else None,
+                 "night": bar(night, near + "-M", target)}
+    return _txl["v"]

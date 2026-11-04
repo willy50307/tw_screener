@@ -35,8 +35,27 @@ def r2(x):
 SPECIAL = {"TX": ("台指期 近月 全盤(夜盤+日盤)", "期貨", "口"), "TXD": ("台指期 近月 日盤", "期貨", "口"), "TAIEX": ("加權指數", "指數", "億")}
 
 
+def _tx_live(f):
+    try:
+        import futures
+        lv = futures.tx_live()
+    except Exception as e:
+        print("台指期夜盤即時抓取失敗", e)
+        return f
+    if not lv or not len(f):
+        return f
+    last = str(f["date"].iloc[-1])[:10]
+    add = [b for b in (lv.get("day"), lv.get("night")) if b and b[0] > last]
+    add = [b for i, b in enumerate(add) if b[0] not in [a[0] for a in add[:i]]]
+    if not add:
+        return f
+    x = pd.DataFrame(add, columns=["date", "open", "high", "low", "close", "volume"])
+    x["volume"] = x["volume"] * 1000
+    return pd.concat([f, x], ignore_index=True)
+
+
 def load_special(code):
-    """台指期：每天成交量最大的月份（近月，換月時會有價差跳動）的日盤；加權指數：taiex_k。
+    """台指期：近月（換月時會有價差跳動）；TX 全盤＝前一晚夜盤＋日盤，夜盤進行中會用期交所即時行情先接上下一個交易日那根；TXD 只有日盤；加權指數：taiex_k。
     volume 存成「單位 × 1000」，讓畫面上「張」的算法直接變成口數／億元"""
     con = connect()
     try:
@@ -61,6 +80,8 @@ def load_special(code):
                 day["volume"] = day["volume"] + n["volume"].fillna(0)
             f = day.reset_index()[["date", "open", "high", "low", "close", "volume"]]
             f["volume"] = f["volume"] * 1000
+            if code == "TX":      # 夜盤進行中（資料庫要隔天下午才有）：用期交所即時行情接上「下一個交易日」這根
+                f = _tx_live(f)
         else:
             f = pd.read_sql("SELECT date, open, high, low, close, amount AS volume FROM taiex_k ORDER BY date", con)
             f["volume"] = f["volume"].fillna(0) / 1e8 * 1000
