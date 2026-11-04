@@ -806,7 +806,13 @@ def options_get():
 @app.get("/api/broker/<code>")
 def broker_stock(code):
     try:
-        return jsonify(broker.stock(code, int(request.args.get("days") or 1)))
+        d = dict(broker.stock(code, int(request.args.get("days") or 1)))
+        if not d.get("error"):
+            try:
+                d["inst"] = chips.stock_inst(code, d["start"], d["date"])
+            except Exception:
+                traceback.print_exc()
+        return jsonify(d)
     except Exception as e:
         traceback.print_exc()
         return jsonify(error=f"{type(e).__name__}: {e}")

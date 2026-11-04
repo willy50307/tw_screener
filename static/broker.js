@@ -39,6 +39,7 @@ async function brShow(){
       <td>${r.buy.toLocaleString()}</td><td>${r.sell.toLocaleString()}</td><td class="k">${r.pct}</td></tr>`).join("")}</table>`;
   const sb = d.buy.reduce((a, r) => a + r.net, 0), ss = d.sell.reduce((a, r) => a + r.net, 0);
   $("brBody").innerHTML = `<div class="br-title"><b>${code} ${name}</b> <span class="k">${range}｜單位：張</span></div>
+    ${brInstHtml(d.inst, d.date)}
     <div class="k" style="margin-bottom:4px">前15大買超合計 <span class="up">${sb.toLocaleString()}</span>｜前15大賣超合計 <span class="down">${Math.abs(ss).toLocaleString()}</span>｜🎯＝隔日沖分點</div>
     ${tb(d.buy, true)}<div style="height:8px"></div>${tb(d.sell, false)}
     <div class="k" style="margin-top:6px">點任一分點，可以看他在這檔股票最近一年的每日買賣超。資料：富邦 e 點通，每天約傍晚更新。</div>`;
@@ -46,6 +47,22 @@ async function brShow(){
     const k = tr.dataset.i, r = (k[0] === "B" ? d.buy : d.sell)[+k.slice(1)];
     brOpen(code, name, r);
   });
+}
+
+// 三大法人買賣超（張）：外資(含外資自營)、投信、自營(避險)、自營(自行)
+function brInstHtml(I, brDate){
+  if (!I) return "";
+  if (!I.days || !I.days.length) return `<div class="k br-inst-none">三大法人：資料庫沒有這檔的法人資料</div>`;
+  const v = n => `<td class="${cls(n)}"><b>${n > 0 ? "+" : ""}${n.toLocaleString()}</b></td>`;
+  const row = (t, x, c) => `<tr${c ? ` class="${c}"` : ""}><td>${t}</td>${v(x.fi)}${v(x.it)}${v(x.dh)}${v(x.dp)}${v(x.tot)}</tr>`;
+  const md = s => s.slice(5).replace("-", "/");
+  const many = I.days.length > 1;
+  const body = many
+    ? (I.days.length <= 10 ? I.days.slice().reverse().map(x => row(md(x.date), x)).join("") : "") + row("合計", I.sum, "br-inst-sum")
+    : row(md(I.end), I.days[0]);
+  const late = I.end !== brDate ? `<span class="down">（${md(brDate)} 法人尚未公布，顯示 ${md(I.end)}）</span>` : "";
+  return `<div class="br-inst"><div class="k" style="margin-bottom:2px">三大法人買賣超｜單位：張${late}</div>
+    <table class="lu-t br-t"><tr><th>日期</th><th>外資</th><th>投信</th><th>自營避險</th><th>自營</th><th>合計</th></tr>${body}</table></div>`;
 }
 
 async function brOpen(code, name, r){

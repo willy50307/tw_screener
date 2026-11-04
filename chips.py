@@ -759,3 +759,47 @@ def inst_range(who="fi", start=None, end=None, n=100, etf=True):
                    "sell_amt": rec(g[g["amt"] < 0].sort_values("amt").head(n))})
     _rng_cache[key] = (stamp, out)
     return out
+
+
+# ---------------- 個股 三大法人（主力面板上方用）----------------
+_si_try = {}
+
+
+def stock_inst(code, start, end):
+    """某檔 start~end 每日 外資(含外資自營)、投信、自營(避險)、自營(自行) 買賣超，單位：張。
+    end 那天資料庫還沒有時，現抓一次證交所 T86／櫃買（同一天 10 分鐘內只試一次）"""
+    con = connect()
+    _init(con)
+    q = lambda: con.execute("SELECT date, fi, fid, it, dh, dp FROM inst WHERE code=? AND date BETWEEN ? AND ? ORDER BY date",
+                            (code, start, end)).fetchall()
+    rows = q()
+    if not rows or rows[-1][0] != end:
+        mk = con.execute("SELECT market FROM prices WHERE code=? ORDER BY date DESC LIMIT 1", (code,)).fetchone()
+        markets = [mk[0]] if mk and mk[0] in ("上市", "上櫃") else ["上市", "上櫃"]
+        d = dt.date.fromisoformat(end)
+        for m in markets:
+            k = (m, end)
+            if time.time() - _si_try.get(k, 0) < 600:
+                continue
+            _si_try[k] = time.time()
+            try:
+                got = FETCH[("inst", m)](d)
+            except Exception:
+                got = None
+            if got:
+                with _lock:
+                    con.executemany(SQL["inst"], [(end, *r) for r in got])
+                    con.execute("INSERT OR REPLACE INTO chips_fetched VALUES(?,?,?,?)", ("inst", m, end, len(got)))
+                    con.commit()
+        rows = q()
+    if not rows:      # 期間內都沒有 → 拿最近一天有的
+        r = con.execute("SELECT date, fi, fid, it, dh, dp FROM inst WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
+                        (code, end)).fetchone()
+        rows = [r] if r else []
+    con.close()
+    days = [{"date": r[0], "fi": round((r[1] or 0) + (r[2] or 0)), "it": round(r[3] or 0),
+             "dh": round(r[4] or 0), "dp": round(r[5] or 0)} for r in rows]
+    for x in days:
+        x["tot"] = x["fi"] + x["it"] + x["dh"] + x["dp"]
+    tot = {k: sum(x[k] for x in days) for k in ("fi", "it", "dh", "dp", "tot")}
+    return {"days": days, "sum": tot, "start": days[0]["date"] if days else None, "end": days[-1]["date"] if days else None}

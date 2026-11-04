@@ -838,3 +838,6 @@ table.ol-fair th{top:-10px;background:var(--panel);z-index:2;padding:4px}
 .st-fold summary:hover{color:var(--text)}
 .st-form input,.st-form select,.st-form textarea{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:4px;padding:4px 6px;font:inherit;font-size:13px;margin:2px}
 @media (max-width:900px){.st-wrap{flex-direction:column}.st-nav{width:auto;flex-direction:row;flex-wrap:wrap;position:static}}
+.br-inst{margin-bottom:8px}
+.br-inst-sum td{border-top:1px solid #434651}
+.br-inst-none{margin-bottom:6px}
