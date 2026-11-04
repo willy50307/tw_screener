@@ -54,7 +54,7 @@ function chRender(){
 // ① 三大法人
 function chInst(){
   const s = CH.summary, x = CH.inst[chWho];
-  const flt = rows => chEtf ? rows.filter(r => !chIsEtf(r.code)) : rows;
+  const flt = k => chEtf ? (x[k + "_x"] || x[k].filter(r => !chIsEtf(r.code))) : x[k];   // 後端另給排除 ETF 的前 100
   const col = (label) => [["#", (r, i) => `<td>${i + 1}</td>`], ["代號", chCode], ["名稱", chName],
     [label, r => `<td>${chN(r[chWho])}</td>`], ["金額(億)", r => `<td>${chN(r[chWho + "_amt"], 2)}</td>`],
     ["收盤", r => `<td>${fmt(r.close)}</td>`], ["漲跌%", r => `<td>${chP(r.chg)}</td>`]];
@@ -64,8 +64,8 @@ function chInst(){
     <div class="k" style="margin:-4px 0 8px">${CH.summary_all != null ? `上市三大法人合計 ${chN(CH.summary_all, 2)} 億｜` : ""}個股金額＝張數 × 收盤價估算。點上面的卡片切換法人</div>
     <div class="lu-box"><div class="lu-title">${x.name}　買超／賣超 前 100 名（${CH.date}）
       <label class="k" style="margin-left:12px"><input type="checkbox" id="chEtf" ${chEtf ? "checked" : ""}> 排除 ETF／債券</label></div>
-    <div class="lu-row"><div class="grow ch-scroll">${chTable(col(x.name + "買超(張)"), flt(x.buy))}</div>
-      <div class="grow ch-scroll">${chTable(col(x.name + "賣超(張)"), flt(x.sell))}</div></div></div>
+    <div class="lu-row"><div class="grow ch-scroll">${chTable(col(x.name + "買超(張)"), flt("buy"))}</div>
+      <div class="grow ch-scroll">${chTable(col(x.name + "賣超(張)"), flt("sell"))}</div></div></div>
     <div id="chRngBox">${chRngHtml()}</div>`;
 }
 

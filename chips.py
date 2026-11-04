@@ -441,7 +441,9 @@ def report(date=None):
     out = {"date": date, "dates": dates[:120], "inst": {}, "summary": {}}
     names = {"fi": "外資", "it": "投信", "dh": "自營商(避險)", "dp": "自營商(自行買賣)"}
     for c, nm in names.items():
-        out["inst"][c] = {"name": nm, "buy": _rows(base, c, extra=(c + "_amt",)), "sell": _rows(base, c, asc=True, extra=(c + "_amt",))}
+        bx = base[~base["code"].map(_is_etf)]       # 排除 ETF／債券後另取前 100（自營避險前 100 多半是 ETF，前端再篩會只剩二十幾檔）
+        out["inst"][c] = {"name": nm, "buy": _rows(base, c, extra=(c + "_amt",)), "sell": _rows(base, c, asc=True, extra=(c + "_amt",)),
+                          "buy_x": _rows(bx, c, extra=(c + "_amt",)), "sell_x": _rows(bx, c, asc=True, extra=(c + "_amt",))}
         out["summary"][c] = {"name": nm, "amt": round(float(base[c + "_amt"].sum()), 2),
                              "twse": round(float(base.loc[base["market"] == "上市", c + "_amt"].sum()), 2)}
 
