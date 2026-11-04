@@ -1,7 +1,8 @@
 // ---------- 籌碼整理頁 ----------
 let CH = null, chDate = "";
 const CH_TABS = [["brief", "🧭 今日盤勢分析"], ["wave", "🌊 波浪"], ["setl", "📅 結算日"], ["warr", "🎫 權證分點"], ["opt", "📈 選擇權未平倉"], ["inst", "🏦 三大法人"], ["dt", "🎯 隔日沖分點"], ["trend", "🌊 資金流向"], ["margin", "💳 融資券／借券"], ["tuyang", "🤝 土洋同步"]];
-let chTab = (() => { try { return localStorage.getItem("chTab") || "inst"; } catch(e) { return "inst"; } })();
+let chTab = (() => { const u = new URLSearchParams(location.search).get("ch"); if (u) return u;   // 網址 ?page=chips&ch=setl 可以直接開某個分頁
+  try { return localStorage.getItem("chTab") || "inst"; } catch(e) { return "inst"; } })();
 let chWho = "fi", chEtf = false;
 const chN = (v, d = 0) => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${Number(v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d})}</span>`;
 const chP = (v, d = 2) => v == null ? "–" : `<span class="${cls(v)}">${v > 0 ? "+" : ""}${fmt(v, d)}%</span>`;
@@ -649,66 +650,243 @@ function waveCharts(){
 
 
 // ---------- 📅 結算日 ----------
-let SETL = null, setlLong = false;
+// 子頁：一次只顯示一個主題，左邊是目錄；記住上次看的子頁
+let SETL = null, SETT = null, SETTR = null, setlLong = false;
+const SETL_SUBS = [["home", "📋 總覽"], ["day", "📆 當天漲跌與振幅"], ["intra", "⏱ 盤中慣性與高低點"], ["tail13", "🎯 尾盤 13:00~13:30"],
+  ["weekly", "📊 週選尾盤波動時段"], ["night", "🌙 夜盤效應與隔日"], ["lotto", "🎰 樂透單策略"], ["trades", "📝 實單紀錄與檢討"]];
+let setlSub = new URLSearchParams(location.search).get("st") || lsGet("setlSub", "home");   // ?st=lotto 直接開子頁
+if (!SETL_SUBS.some(s => s[0] === setlSub)) setlSub = "home";
+const stUl = a => `<ul>${a.map(x => `<li>${x}</li>`).join("")}</ul>`;
+const stKey = (lines, title = "重點結論") => `<div class="lu-box brief-sum"><div class="lu-title">💡 ${title}</div><div class="lu-guide">${stUl(lines)}</div></div>`;
+const stPt = v => v == null ? "–" : Math.round(v).toLocaleString();
+const stX = v => v == null ? "–" : `<span class="${v > 1 ? "up" : v < 1 ? "down" : ""}">${fmt(v, 2)} 倍</span>`;
+const stFold = (title, html, open = false) => `<details class="st-fold" ${open ? "open" : ""}><summary>${title}</summary>${html}</details>`;
+
 async function setlShow(){
   if (chTab !== "setl") return;       // 重試／計時器觸發時已經切到別的分頁，不要蓋掉別頁的內容
-  if (!SETL) {
+  if (!SETL || !SETT) {
     $("chBody").innerHTML = `<div class="k" style="padding:20px">統計結算日中…</div>`;
-    try { SETL = await api("/api/settlement"); } catch(e) { setTimeout(setlShow, 3000); return; }
+    try {
+      [SETL, SETT, SETTR] = await Promise.all([SETL || api("/api/settlement"), SETT || api("/api/settle_tail"), SETTR || api("/api/settle_trades")]);
+    } catch(e) { setTimeout(setlShow, 3000); return; }
   }
   if (chTab !== "setl") return;       // 載入期間已經切到別的分頁
   const O = SETL;
   if (O.error) { $("chBody").innerHTML = `<div class="k" style="padding:20px">${O.error}</div>`; return; }
   $("chDate").innerHTML = `<option>${O.next.today}</option>`;
-  const per = setlLong ? "long" : "recent", D = setlLong ? O.daily_long : O.daily_recent;
-  const ul = a => `<ul>${a.map(x => `<li>${x}</li>`).join("")}</ul>`;
-  const pc = v => chP(v);
-  const cmpT = rows => chTable([["項目", r => `<td>${r.name}</td>`],
+  $("chBody").innerHTML = `<div class="st-wrap"><nav class="st-nav">${SETL_SUBS.map(([k, n]) => `<button data-st="${k}" class="${k === setlSub ? "on" : ""}">${n}</button>`).join("")}</nav>
+    <div class="st-main" id="stMain"></div></div>`;
+  document.querySelectorAll("#chBody [data-st]").forEach(b => b.onclick = () => setlGo(b.dataset.st));
+  setlPage();
+}
+
+function setlGo(k){
+  setlSub = k; lsSet("setlSub", k);
+  document.querySelectorAll("#chBody [data-st]").forEach(b => b.classList.toggle("on", b.dataset.st === k));
+  setlPage();
+  const m = $("stMain"); if (m) m.scrollTop = 0;
+}
+
+function setlPage(){
+  const el = $("stMain"); if (!el) return;
+  const f = {home: setlHome, day: setlDay, intra: setlIntra, tail13: setlTail13, weekly: setlWeekly, night: setlNightPage, lotto: setlLotto, trades: setlTrades}[setlSub] || setlHome;
+  const tailPages = ["weekly", "lotto"];
+  if (tailPages.includes(setlSub) && (!SETT || SETT.error)) { el.innerHTML = `<div class="k" style="padding:20px">${SETT ? SETT.error : "尾盤統計載入失敗"}</div>`; return; }
+  el.innerHTML = f();
+  el.querySelectorAll("[data-go]").forEach(b => b.onclick = () => setlGo(b.dataset.go));
+  el.querySelectorAll("[data-sl]").forEach(b => b.onclick = () => { setlLong = b.dataset.sl === "1"; setlPage(); });
+  if (setlSub === "night") setlNight5Chart(SETL);
+  if (setlSub === "trades") setlTradesBind();
+}
+
+// ---- 各子頁的一句話（總覽用），數字都從 API 來 ----
+function setlOneLiners(){
+  const O = SETL, S = SETT && !SETT.error ? SETT : null, D = O.daily_recent, h = {}; O.intra.hours.forEach(x => h[x.h.slice(0, 5)] = x);
+  const n5 = O.night5 ? O.night5.days : [];
+  const R = S && S.exit.all.length ? Object.fromEntries(S.exit.all.map(r => [r.key, r])) : null;
+  return {
+    day: `月結算日當天近期平均 ${chP(D.chg.settle.avg)}、上漲 ${fmt(D.chg.settle.up, 0)}%（非結算週三 ${chP(D.chg.base.avg)}）；振幅 ${fmt(D.rng.settle)}% vs ${fmt(D.rng.wed)}%`,
+    intra: `09 點最常是高點（${O.hilo.settle_hi[9] || 0}/${O.intra.n} 次）、13 點最常是低點（${O.hilo.settle_lo[13] || 0} 次）；12:00~13:00 只有 ${fmt(h["12:00"].s_up, 0)}% 上漲；V 型反轉 ${n5.filter(d => d.v).length}/${n5.length} 天`,
+    tail13: `13:00~13:30 拉尾盤 ${fmt(O.tail.settle.pull, 0)}%、殺尾盤 ${fmt(O.tail.settle.kill, 0)}%、波動不大 ${fmt(O.tail.settle.flat, 0)}%；跟早盤反向 ${fmt(O.tail.settle.rev, 0)}%`,
+    weekly: S ? `${S.n} 個週選／月選結算日：最大 15 分鐘急漲急跌從 12:30 後開始 ${S.mx["15"].after1230}/${S.n} 天，但 12:30 起到收盤單邊平均仍有 ${stPt(S.from_t[1].big)} 點` : "尾盤統計載入失敗",
+    night: O.night5 ? `前一晚夜盤漲 ≧0.5% 的隔天：${O.night5.summary.n_up} 天裡 ${O.night5.summary.low_first} 天先低後高；結算隔天平均 ${chP(D.next.settle.avg)}` : "",
+    lotto: R ? `抱到結算總損益 ${R.a.pnl > 0 ? "+" : ""}${fmt(R.a.pnl, 1)} 單位，5 倍全出 ${R.b5.pnl > 0 ? "+" : ""}${fmt(R.b5.pnl, 1)}、分批＋回落 40% ${R.d40.pnl > 0 ? "+" : ""}${fmt(R.d40.pnl, 1)}（${S.exit.n} 筆）` : "樣本不足",
+    trades: `${(SETTR || []).length} 筆實單紀錄${(SETTR || []).length ? `，最近 ${SETTR[SETTR.length - 1].date}` : ""}`,
+  };
+}
+
+function setlHome(){
+  const L = setlOneLiners(), S = SETT && !SETT.error ? SETT : null;
+  return `${stKey([`月結算統計：2025 年起 ${SETL.n.recent} 次（最近 ${SETL.n.last}），日K 另看 2015 年起 ${SETL.n.long} 次`,
+      S ? `週選尾盤 1 分K：${S.n} 個結算日（${S.d_from} ~ ${S.d_to}）${S.n_5m ? `，其中 ${S.n_5m} 天只有 5 分K` : ""}${S.missing.length ? `；沒有分K：${S.missing.join("、")}` : ""}` : "",
+      `下一次月結算：${SETL.next.date}（還有 ${SETL.next.days} 個交易日）`].filter(x => x), "這一區在看什麼")}
+    <div class="lu-box"><div class="lu-title">📚 目錄（點一下進去）</div>
+    ${chTable([["主題", r => `<td><button class="btn ghost st-link" data-go="${r[0]}">${r[1]}</button></td>`], ["一句話結論", r => `<td style="text-align:left">${L[r[0]] || ""}</td>`]], SETL_SUBS.slice(1))}</div>`;
+}
+
+// ① 結算日當天漲跌與振幅（月結算，加權指數日K）
+function setlDay(){
+  const O = SETL, per = setlLong ? "long" : "recent", D = setlLong ? O.daily_long : O.daily_recent, pc = v => chP(v);
+  const cmpT = chTable([["項目", r => `<td>${r.name}</td>`],
     ["結算日平均", r => `<td>${pc(r.settle.avg)}</td>`], ["結算日上漲%", r => `<td>${fmt(r.settle.up, 0)}%</td>`],
     [`${D.chg.base_name}／基準平均`, r => `<td>${pc(r.base.avg)}</td>`], ["基準上漲%", r => `<td>${fmt(r.base.up, 0)}%</td>`]], [D.chg, D.o2c, D.gap, D.next]);
   const condT = (rows, first) => chTable([[first, r => `<td>${r.cond}</td>`], ["次數", r => `<td>${r.n}</td>`], ["結算日漲跌", r => `<td>${pc(r.chg)}</td>`],
     ["結算日上漲%", r => `<td>${fmt(r.up, 0)}%</td>`], ["開→收", r => `<td>${pc(r.o2c)}</td>`], ["收紅K%", r => `<td>${fmt(r.red, 0)}%</td>`],
     ["結算隔天", r => `<td>${pc(r.next)}</td>`]], rows || []);
-  const H = O.intra.hours, mx = Math.max(...H.map(x => Math.max(Math.abs(x.s_avg), Math.abs(x.w_avg))), 0.01);
-  const bar = v => `<div class="ch-bar"><i style="width:${Math.abs(v) / mx * 50}%;${v >= 0 ? "left:50%;background:var(--up)" : "right:50%;background:var(--down)"}"></i><span>${pc(v)}</span></div>`;
-  const hiLo = (k) => [9, 10, 11, 12, 13].map(h => `${h}點 ${O.hilo[k][h] || 0}`).join("｜");
-  const nx = O.next;
-  const mt = (nx.d_2 > 0 ? "一漲" : "一跌") + (nx.d_1 > 0 ? "二漲" : "二跌");
-  const nowPat = (O.montue[per] || []).find(r => r.cond === mt);
-  $("chBody").innerHTML = `
-    <div class="lu-box brief-sum"><div class="lu-title">📅 台指期月結算日統計
+  const nx = O.next, mt = (nx.d_2 > 0 ? "一漲" : "一跌") + (nx.d_1 > 0 ? "二漲" : "二跌"), nowPat = (O.montue[per] || []).find(r => r.cond === mt);
+  return `${stKey([O.text[0], O.text[1], O.text[2], O.text[6]])}
+    <div class="lu-box"><div class="lu-title">🔔 下一次結算：${nx.date}（還有 ${nx.days} 個交易日）
       <span class="lu-studies" style="margin-left:10px"><button data-sl="0" class="${!setlLong ? "on" : ""}">2025 年起（${O.n.recent} 次）</button><button data-sl="1" class="${setlLong ? "on" : ""}">2015 年起（${O.n.long} 次）</button></span></div>
-      <div class="lu-guide">${ul(O.text)}</div>
-      <div class="k" style="margin-top:6px">結算日＝每月第三個星期三（遇假日順延，用期交所各月合約最後交易日）；結算價＝當天 13:00~13:30 加權指數平均。日K 與盤中都用加權指數。</div></div>
-    <div class="lu-box"><div class="lu-title">🔔 下一次結算：${nx.date}（還有 ${nx.days} 個交易日）</div>
       <div class="k" style="line-height:1.8">結算前一天（${nx.today}）加權 ${pc(nx.d_1)}（開→收 ${pc(nx.d_1_o2c)}）｜前兩天 ${pc(nx.d_2)}｜兩天合計 ${pc(nx.w2)}｜${nx.above20 ? "在月線上" : "在月線下"}<br>
       → 對應組合「${mt}」：${nowPat ? `過去 ${nowPat.n} 次，結算日平均 ${pc(nowPat.chg)}、上漲 ${fmt(nowPat.up, 0)}%、隔天平均 ${pc(nowPat.next)}` : "沒有樣本"}</div></div>
-    <div class="lu-row"><div class="lu-box grow"><div class="lu-title">① 日K：結算日 vs 一般的星期三</div>${cmpT()}
-      <div class="k" style="margin-top:6px">振幅：結算日 ${fmt(D.rng.settle)}%｜非結算週三 ${fmt(D.rng.wed)}%｜所有交易日 ${fmt(D.rng.all)}%；收盤在當天區間的位置：結算日 ${fmt(D.clpos.settle * 100, 0)}%、週三 ${fmt(D.clpos.wed * 100, 0)}%（越低＝收在越接近低點）</div></div>
-      <div class="lu-box grow"><div class="lu-title">② 盤中（60 分K，2025 年起 ${O.intra.n} 次結算 vs ${O.intra.n_w} 個一般週三）</div>
+    <div class="lu-box"><div class="lu-title">日K：結算日 vs 一般的星期三</div>${cmpT}
+      <div class="k" style="margin-top:6px">振幅：結算日 ${fmt(D.rng.settle)}%｜非結算週三 ${fmt(D.rng.wed)}%｜所有交易日 ${fmt(D.rng.all)}%；收盤在當天區間的位置：結算日 ${fmt(D.clpos.settle * 100, 0)}%、週三 ${fmt(D.clpos.wed * 100, 0)}%（越低＝收在越接近低點）</div>
+      <div class="k">結算日＝每月第三個星期三（遇假日順延，用期交所各月合約最後交易日）；結算價＝當天 13:00~13:30 加權指數平均。</div></div>
+    <div class="lu-row"><div class="lu-box grow"><div class="lu-title">結算前一天（通常是週二）漲跌 → 結算日</div>${condT(O.tue[per], "前一天")}
+        <div style="height:6px"></div>${condT(O.tue_k[per], "前一天 K 棒")}
+        <div class="k">前一天和結算日同方向：${fmt(O.tue_same[per].same, 0)}%（50% ＝ 沒有關聯）</div></div>
+      <div class="lu-box grow"><div class="lu-title">結算前兩天（週一＋週二）組合 → 結算日</div>${condT(O.montue[per], "前兩天")}
+        <div style="height:6px"></div>${condT(O.week2[per], "兩天合計")}</div></div>
+    <div class="lu-box"><div class="lu-title">大架構：結算前一天在月線上／下（2015 年起）</div>${condT(O.trend.long, "位置")}</div>`;
+}
+
+// ② 盤中慣性與高低點時段（月結算，60 分K）
+function setlIntra(){
+  const O = SETL, pc = v => chP(v), H = O.intra.hours, mx = Math.max(...H.map(x => Math.max(Math.abs(x.s_avg), Math.abs(x.w_avg))), 0.01);
+  const bar = v => `<div class="ch-bar"><i style="width:${Math.abs(v) / mx * 50}%;${v >= 0 ? "left:50%;background:var(--up)" : "right:50%;background:var(--down)"}"></i><span>${pc(v)}</span></div>`;
+  const hiLo = k => [9, 10, 11, 12, 13].map(h => `${h}點 ${O.hilo[k][h] || 0}`).join("｜");
+  const top = k => { const e = Object.entries(O.hilo[k]).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} 點（${e[1]}/${O.intra.n} 次）` : "–"; };
+  const n5 = O.night5 ? O.night5.days : [];
+  return `${stKey([`近 ${O.intra.n} 次月結算：最高點最常出現在 ${top("settle_hi")}，最低點最常出現在 ${top("settle_lo")}`, O.text[4],
+      n5.length ? `V 型反轉（先壓 ≧0.3% 再拉上去收紅）：近 ${n5.length} 個交易日有 ${n5.filter(d => d.v).length} 天（5 分K，所有日子）` : ""].filter(x => x))}
+    <div class="lu-box"><div class="lu-title">各小時漲跌（60 分K，2025 年起 ${O.intra.n} 次結算 vs ${O.intra.n_w} 個一般週三）</div>
       ${chTable([["時段", r => `<td>${r.h}</td>`], ["結算日平均", r => `<td>${bar(r.s_avg)}</td>`], ["結算日上漲%", r => `<td class="${r.s_up >= 65 ? "up" : r.s_up <= 35 ? "down" : ""}"><b>${fmt(r.s_up, 0)}%</b></td>`],
         ["一般週三平均", r => `<td>${bar(r.w_avg)}</td>`], ["一般週三上漲%", r => `<td>${fmt(r.w_up, 0)}%</td>`], ["平均波動", r => `<td>${fmt(r.s_abs)}%／${fmt(r.w_abs)}%</td>`]], H)}
-      <div class="k" style="margin-top:6px">當天最高點出現在：${hiLo("settle_hi")}<br>當天最低點出現在：${hiLo("settle_lo")}<br>（一般週三最高：${hiLo("wed_hi")}；最低：${hiLo("wed_lo")}）</div></div></div>
-    <div class="lu-row"><div class="lu-box grow"><div class="lu-title">③ 尾盤 13:00~13:30（結算價計算區間）：拉尾盤還是殺尾盤？</div>
+      <div class="k" style="margin-top:6px">當天最高點出現在：${hiLo("settle_hi")}<br>當天最低點出現在：${hiLo("settle_lo")}<br>（一般週三最高：${hiLo("wed_hi")}；最低：${hiLo("wed_lo")}）</div></div>
+    <div class="lu-box">${stFold(`每一次月結算日明細（2025 年起 ${O.detail.length} 次，加權指數 %）`, chTable([["結算日", r => `<td>${r.date}</td>`], ["前兩天", r => `<td>${pc(r.mon)}</td>`], ["前一天", r => `<td>${pc(r.tue)}</td>`], ["開盤跳空", r => `<td>${pc(r.gap)}</td>`],
+        ["09~11點", r => `<td>${pc(r.am)}</td>`], ["11~13點", r => `<td>${pc(r.pm)}</td>`], ["13:00~13:30", r => `<td><b>${pc(r.last)}</b></td>`],
+        ["當天漲跌", r => `<td>${pc(r.chg)}</td>`], ["隔天", r => `<td>${pc(r.next)}</td>`], ["高點／低點時段", r => `<td>${r.hi_h}點／${r.lo_h}點</td>`]], O.detail)
+        + `<div class="k">樣本只有 ${O.detail.length} 次，慣性僅供參考；60 分K 是 Yahoo 的加權指數資料（09、10、11、12 點各一根，13 點那根是 13:00~13:30）</div>`)}</div>`;
+}
+
+// ③ 尾盤 13:00~13:30（結算價計算區間）
+function setlTail13(){
+  const O = SETL, t = O.tail;
+  return `${stKey([O.text[3], `一般週三：拉尾盤 ${fmt(t.wed.pull, 0)}%、殺尾盤 ${fmt(t.wed.kill, 0)}%、平均波動 ${fmt(t.wed.abs)}%；所有交易日平均波動 ${fmt(t.all.abs)}%`,
+      `結算日尾盤延續早盤方向 ${fmt(t.settle.cont, 0)}%、反轉 ${fmt(t.settle.rev, 0)}%`])}
+    <div class="lu-box"><div class="lu-title">13:00~13:30：拉尾盤還是殺尾盤？（月結算，60 分K）</div>
       ${chTable([["", r => `<td>${r[0]}</td>`], ["次數", r => `<td>${r[1].n}</td>`], ["拉尾盤（≧+0.15%）", r => `<td class="up">${fmt(r[1].pull, 0)}%</td>`],
         ["殺尾盤（≦-0.15%）", r => `<td class="down">${fmt(r[1].kill, 0)}%</td>`], ["波動不大", r => `<td>${fmt(r[1].flat, 0)}%</td>`],
-        ["跟早盤反向", r => `<td>${fmt(r[1].rev, 0)}%</td>`], ["平均波動", r => `<td>${fmt(r[1].abs)}%</td>`]], [["結算日", O.tail.settle], ["一般週三", O.tail.wed], ["所有交易日", O.tail.all]])}
-      <div class="k">「跟早盤反向」＝ 13:00 後的走勢方向和 09:00~13:00 相反（尾盤反轉）</div></div>
-      <div class="lu-box grow"><div class="lu-title">④ 結算前一天（通常是週二）漲跌 → 結算日</div>${condT(O.tue[per], "前一天")}
-        <div style="height:6px"></div>${condT(O.tue_k[per], "前一天 K 棒")}
-        <div class="k">前一天和結算日同方向：${fmt(O.tue_same[per].same, 0)}%（50% ＝ 沒有關聯）</div></div></div>
-    <div class="lu-row"><div class="lu-box grow"><div class="lu-title">⑤ 結算前兩天（週一＋週二）組合 → 結算日</div>${condT(O.montue[per], "前兩天")}
-        <div style="height:6px"></div>${condT(O.week2[per], "兩天合計")}</div>
-      <div class="lu-box grow"><div class="lu-title">⑥ 大架構：結算前一天在月線上／下（2015 年起）</div>${condT(O.trend.long, "位置")}</div></div>
+        ["跟早盤反向", r => `<td>${fmt(r[1].rev, 0)}%</td>`], ["平均波動", r => `<td>${fmt(r[1].abs)}%</td>`]], [["結算日", t.settle], ["一般週三", t.wed], ["所有交易日", t.all]])}
+      <div class="k">「跟早盤反向」＝ 13:00 後的走勢方向和 09:00~13:00 相反（尾盤反轉）。週選的 1 分K 版本見「📊 週選尾盤波動時段」。</div></div>`;
+}
+
+// ④ 週選尾盤波動時段（1 分K）
+function setlWeekly(){
+  const S = SETT, n = S.n;
+  const segT = chTable([["時段", r => `<td>${r.seg}</td>`], ["分鐘", r => `<td>${r.min}</td>`], ["平均｜漲跌｜", r => `<td>${stPt(r.abs_chg)}</td>`],
+    ["平均振幅", r => `<td>${stPt(r.rng)}</td>`], ["換算每 30 分振幅", r => `<td><b>${stPt(r.rng30)}</b></td>`], ["最大振幅", r => `<td>${stPt(r.rng_max)}</td>`]], S.segs);
+  const pp = S.prepost, ppT = chTable([["", r => `<td>${r[0]}</td>`], ["最大漲幅（低→後高）", r => `<td>${stPt(r[1].up.avg)}／${stPt(r[1].up.med)}／${stPt(r[1].up.max)}</td>`],
+    ["最大跌幅（高→後低）", r => `<td>${stPt(r[1].dn.avg)}／${stPt(r[1].dn.med)}／${stPt(r[1].dn.max)}</td>`], ["振幅", r => `<td>${stPt(r[1].rng.avg)}／${stPt(r[1].rng.med)}／${stPt(r[1].rng.max)}</td>`],
+    ["最大 15 分波動", r => `<td><b>${stPt(r[1].mx15.avg)}</b>／${stPt(r[1].mx15.med)}／${stPt(r[1].mx15.max)}</td>`]], [["12:30 前（225 分）", pp.pre], ["12:30 後（60 分）", pp.post]]);
+  const dist = chTable([["時段", r => `<td>${r.b}</td>`], ["全天高點", r => `<td>${r.hi}</td>`], ["全天低點", r => `<td>${r.lo}</td>`],
+    ["最大 15 分波動起點", r => `<td>${S.mx["15"].dist.find(x => x.b === r.b).n}</td>`], ["最大 30 分波動起點", r => `<td>${S.mx["30"].dist.find(x => x.b === r.b).n}</td>`]], S.hilo);
+  const frT = chTable([["起點", r => `<td>${r.t}</td>`], ["到收盤淨漲跌｜平均｜", r => `<td>${stPt(r.net)}</td>`], ["最大上漲", r => `<td class="up">${stPt(r.up)}</td>`],
+    ["最大下跌", r => `<td class="down">${stPt(r.dn)}</td>`], ["單邊最大", r => `<td><b>${stPt(r.big)}</b></td>`], ["順向（跟早盤同方向）", r => `<td>${stPt(r.same)}</td>`],
+    ["逆向（跟早盤反向）", r => `<td><b>${stPt(r.rev)}</b></td>`], ["≥100 點", r => `<td>${r.ge100}/${r.n}</td>`], ["≥150 點", r => `<td>${r.ge150}/${r.n}</td>`], ["≥200 點", r => `<td>${r.ge200}/${r.n}</td>`]], S.from_t);
+  const wkT = chTable([["", r => `<td>${r.name}</td>`], ["天數", r => `<td>${r.n}</td>`], ["全天振幅", r => `<td>${stPt(r.range)}</td>`], ["12:30 前振幅", r => `<td>${stPt(r.pre_rng)}</td>`],
+    ["12:30 後振幅", r => `<td>${stPt(r.post_rng)}</td>`], ["13:00 後單邊最大", r => `<td>${stPt(r.big1300)}</td>`], ["尾盤創高或創低", r => `<td>${r.tail}/${r.n}</td>`]], S.week);
+  const detT = chTable([["結算日", r => `<td>${r.date}（${r.wd}）</td>`], ["種類", r => `<td>${r.kind}</td>`], ["分K", r => `<td>${r.src}</td>`], ["開", r => `<td>${stPt(r.open)}</td>`],
+    ["收", r => `<td>${stPt(r.close)}（${chN(r.chg)}）</td>`], ["振幅", r => `<td>${stPt(r.range)}</td>`], ["高點", r => `<td>${r.high_t}</td>`], ["低點", r => `<td>${r.low_t}</td>`],
+    ["12:30 前／後振幅", r => `<td>${stPt(r.pre_rng)}／${stPt(r.post_rng)}</td>`], ["13:00 後↑／↓", r => `<td>${stPt((r.from["13:00"] || {}).up)}／${stPt((r.from["13:00"] || {}).dn)}</td>`],
+    ["最大 15 分", r => `<td>${stPt(r.mx15)}${r.mx15_dir}＠${r.mx15_t}</td>`], ["尾盤", r => `<td>${r.tail_hi ? "<span class='up'>新高</span>" : ""}${r.tail_lo ? "<span class='down'>新低</span>" : ""}</td>`],
+    ["估計結算價", r => `<td>${stPt(r.settle_est)}</td>`]], S.days);
+  return `${stKey(S.text.tail)}
+    <div class="lu-box"><div class="lu-title">各時段平均（點，台指期近月）</div>${segT}
+      <div class="k">換算每 30 分振幅＝平均振幅 ÷ 分鐘 × 30，方便比較長短不同的時段（振幅不是線性，只當相對參考）</div></div>
+    <div class="lu-row"><div class="lu-box grow"><div class="lu-title">12:30 前 vs 12:30 後（點：平均／中位／最大）</div>${ppT}
+      <div class="k">12:30 後最大 15 分波動比 12:30 前大的只有 ${S.post_bigger}/${n} 天；12:30 後創當日新高 ${S.tail.hi} 次、新低 ${S.tail.lo} 次（合計 ${S.tail.any}/${n} 天）</div></div>
+      <div class="lu-box grow"><div class="lu-title">週三 vs 週五</div>${wkT}</div></div>
+    <div class="lu-box"><div class="lu-title">以 12:00／12:30／13:00 為起點到 13:30 收盤（點）</div>${frT}
+      <div class="k">單邊最大＝起點後最大上漲、最大下跌取大的；順向／逆向＝跟「開盤到起點」同方向／反方向的最大延伸</div></div>
+    <div class="lu-box"><div class="lu-title">全天高低點、最大 15／30 分鐘波動起點出現在哪個時段（次數）</div>${dist}
+      <div class="k">最大 15 分波動平均 ${stPt(S.mx["15"].avg)} 點、30 分 ${stPt(S.mx["30"].avg)} 點</div></div>
+    <div class="lu-box">${stFold(`每日明細（${n} 天）`, `<div class="ch-scroll">${detT}</div>`)}
+      <div class="k">樣本 ${S.d_from} ~ ${S.d_to}；結算日＝各到期合約的實際最後交易日（遇休市順延）。${S.n_5m ? `${S.n_5m} 天只有 5 分K。` : ""}估計結算價＝13:00~13:30 期貨均價 − 基差（選擇權買賣權平價反推），約 ±30 點誤差。統計時間 ${S.made}</div></div>`;
+}
+
+// ⑤ 夜盤效應與隔日
+function setlNightPage(){
+  const O = SETL, s = O.night5 ? O.night5.summary : null;
+  return `${stKey([O.text[5], s ? `前一晚夜盤漲 ≧0.5% 的隔天（${s.n_up} 天）：${s.low_first} 天先低後高、開→收平均 ${chP(s.o2c)}、收紅 ${fmt(s.red, 0)}%、11:00 後平均 ${chP(s.pm)}` : "",
+      O.text[6]].filter(x => x))}
     ${setlNight(O)}
-    ${setlNight5(O)}
-    <div class="lu-box"><div class="lu-title">⑦ 每一次結算日明細（2025 年起，加權指數 %）</div>
-      ${chTable([["結算日", r => `<td>${r.date}</td>`], ["前兩天", r => `<td>${pc(r.mon)}</td>`], ["前一天", r => `<td>${pc(r.tue)}</td>`], ["開盤跳空", r => `<td>${pc(r.gap)}</td>`],
-        ["09~11點", r => `<td>${pc(r.am)}</td>`], ["11~13點", r => `<td>${pc(r.pm)}</td>`], ["13:00~13:30", r => `<td><b>${pc(r.last)}</b></td>`],
-        ["當天漲跌", r => `<td>${pc(r.chg)}</td>`], ["隔天", r => `<td>${pc(r.next)}</td>`], ["高點／低點時段", r => `<td>${r.hi_h}點／${r.lo_h}點</td>`]], O.detail)}
-      <div class="k">樣本只有 21 次，慣性僅供參考；60 分K 是 Yahoo 的加權指數資料（09、10、11、12 點各一根，13 點那根是 13:00~13:30）</div></div>`;
-  document.querySelectorAll("#chBody [data-sl]").forEach(b => b.onclick = () => { setlLong = b.dataset.sl === "1"; setlShow(); });
-  setlNight5Chart(O);
+    ${setlNight5(O)}`;
+}
+
+// ⑥ 樂透單策略
+function setlLotto(){
+  const S = SETT, ex = S.exit;
+  const ltT = chTable([["進場", r => `<td>${r.t}</td>`], ["買賣權", r => `<td>${r.cp === "C" ? "<span class='up'>Call</span>" : "<span class='down'>Put</span>"}</td>`], ["價外", r => `<td>${r.otm} 點</td>`],
+    ["天數", r => `<td>${r.n}</td>`], ["中位進場價", r => `<td>${fmt(r.px, 1)}</td>`], ["結算還有價值", r => `<td class="${r.settle_ok ? "up" : ""}">${r.settle_ok}/${r.n}</td>`],
+    ["盤中 ≥2 倍", r => `<td>${r.x2}</td>`], ["≥3 倍", r => `<td>${r.x3}</td>`], ["≥5 倍", r => `<td>${r.x5}</td>`]], S.lotto);
+  const ruleT = rules => chTable([["出場規則", r => `<td style="text-align:left">${r.name}</td>`], ["平均倍數", r => `<td>${stX(r.avg)}</td>`], ["勝率", r => `<td>${fmt(r.win, 0)}%</td>`],
+    ["最大單筆", r => `<td>${fmt(r.best, 1)} 倍</td>`], ["總損益（每筆 1 單位）", r => `<td><b>${chN(r.pnl, 1)}</b></td>`]], rules);
+  const RN = Object.fromEntries(S.rules.map(r => [r.key, r.name]));
+  const trT = chTable([["日期", r => `<td>${r.date}（${r.wd}）</td>`], ["進場", r => `<td>${r.entry}</td>`], ["早盤", r => `<td>${chN(r.morning)}</td>`],
+    ["買", r => `<td>${r.strike} ${r.cp === "C" ? "Call" : "Put"}</td>`], ["價外", r => `<td>${stPt(r.otm)}</td>`], ["成本", r => `<td>${fmt(r.px, 1)}</td>`],
+    ["盤中最高", r => `<td>${fmt(r.max, 1)}＠${r.max_t}（${fmt(r.max_x, 1)} 倍）</td>`], ["結算價值", r => `<td>${fmt(r.settle_val, 1)}</td>`],
+    ...["a", "b5", "d40", "e1325"].map(k => [RN[k], r => `<td>${stX(r[k])}</td>`])], S.trades);
+  const tips = ["週五到期的週選一樣用加權指數（現貨）結算；算價外距離要用現貨或選擇權反推的指數，不是台指期" + (S.basis_med ? `（這段期間台指期平均比現貨高約 ${stPt(S.basis_med)} 點）` : ""),
+    "勒式（Call、Put 各買一邊，每邊預算約 20 點）：有一邊先翻倍就先賣一半，剩下的當免費單",
+    "轉折玩法：每一邊最多試兩次；每一筆只用樂透預算的 1/4~1/3，不要一次全押"];
+  return `${stKey(S.text.lotto)}
+    ${stKey(S.text.advice, "操作建議（依回測結果）")}
+    <div class="lu-box"><div class="lu-title">📌 過去討論的要點</div><div class="lu-guide">${stUl(tips)}</div></div>
+    <div class="lu-box"><div class="lu-title">出場規則回測：跟早盤反向、權利金 5~20 點裡最價外的那檔（${ex.n || 0} 筆，${ex.n_days} 個結算日）</div>
+      <div class="k" style="margin-bottom:6px">用 1 分K 收盤價成交，到價也看收盤價；價外距離用選擇權反推的加權指數。原條件「價外 300~500 點、5~20 點」只找到 ${ex.strict} 筆（${ex.slots} 個進場時點），價外 300~500 點的權利金中位數 ${fmt(ex.far_px, 1)} 點。</div>
+      <div class="lu-title">三個進場時間合計</div>${ruleT(ex.all)}
+      <div class="lu-row" style="margin-top:8px">${ex.by_entry.map(e => `<div class="lu-box grow"><div class="lu-title">${e.entry} 進場（${e.n} 筆，價外中位 ${stPt(e.otm)} 點、成本中位 ${fmt(e.px, 1)}）${e.n < 8 ? " <span class='k'>樣本少</span>" : ""}</div><div class="ch-scroll">${ruleT(e.rules)}</div></div>`).join("")}</div>
+      ${stFold(`回測明細（${S.trades.length} 筆）`, `<div class="ch-scroll">${trT}</div>`)}</div>
+    <div class="lu-box"><div class="lu-title">樂透單：進場時間 × 價外距離（當天到期合約，抱到結算 vs 盤中最高）</div>${ltT}
+      <div class="k">履約價取最接近的 50 點；「盤中 ≥2 倍」＝進場後當天最高價達成本的 2 倍（常常只是 0.x 點的跳動）；結算價值用估計結算價算</div></div>`;
+}
+
+// ⑦ 實單紀錄與檢討
+function setlTrades(){
+  const T = SETTR || [];
+  const tT = chTable([["日期", r => `<td>${r.date}${r.kind ? `（${r.kind}）` : ""}</td>`], ["進場", r => `<td>${r.entry_t || ""}</td>`],
+    ["買", r => `<td>${r.strike ? `${r.strike} ${r.cp === "P" ? "Put" : "Call"}` : (r.cp || "")}</td>`], ["進場時指數", r => `<td>${stPt(r.idx_entry)}</td>`],
+    ["成本", r => `<td>${r.cost ?? "–"}</td>`], ["賣出", r => `<td>${r.exit ?? "–"}${r.exit_t ? `＠${r.exit_t}` : ""}</td>`],
+    ["倍數", r => `<td>${r.cost && r.exit != null ? stX(r.exit / r.cost) : "–"}</td>`], ["之後最高", r => `<td>${r.peak ?? "–"}${r.idx_peak ? `（指數約 ${stPt(r.idx_peak)}）` : ""}</td>`],
+    ["結果", r => `<td>${r.result || ""}</td>`], ["檢討", r => `<td style="text-align:left;max-width:420px;white-space:normal">${r.review || ""}</td>`],
+    ["", r => `<td><button class="btn ghost" data-del="${r.id}" style="padding:2px 8px">刪除</button></td>`]], T);
+  const inp = (k, ph, w = 90) => `<input data-f="${k}" placeholder="${ph}" style="width:${w}px">`;
+  return `${stKey([`共 ${T.length} 筆實單紀錄`, "把每次結算日的實單記下來，對照回測：進場時間、方向（跟早盤同向或反向）、出場是否太早／太晚"])}
+    <div class="lu-box"><div class="lu-title">📝 實單紀錄</div><div class="ch-scroll">${tT}</div></div>
+    <div class="lu-box st-form"><div class="lu-title">➕ 新增一筆</div>
+      ${inp("date", "日期 2026-11-04", 110)}${inp("kind", "週三／週五／月選", 110)}${inp("entry_t", "進場時間", 80)}
+      <select data-f="cp"><option value="C">Call</option><option value="P">Put</option></select>
+      ${inp("strike", "履約價")}${inp("idx_entry", "進場時指數")}${inp("cost", "成本", 60)}${inp("exit", "賣出價", 60)}${inp("exit_t", "賣出時間", 80)}
+      ${inp("peak", "之後最高", 70)}${inp("idx_peak", "最高時指數")}${inp("result", "結果", 140)}<br>
+      <textarea data-f="review" placeholder="檢討" rows="2" style="width:100%;margin-top:6px"></textarea>
+      <button class="btn" id="stAdd" style="margin-top:6px">新增</button> <span class="k" id="stMsg"></span></div>`;
+}
+
+function setlTradesBind(){
+  const el = $("stMain");
+  el.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("刪除這筆紀錄？")) return;
+    await api("/api/settle_trades/" + b.dataset.del, {method: "DELETE"});
+    SETTR = await api("/api/settle_trades"); setlPage();
+  });
+  const add = $("stAdd"); if (!add) return;
+  add.onclick = async () => {
+    const body = {}; el.querySelectorAll(".st-form [data-f]").forEach(x => { if (x.value.trim()) body[x.dataset.f] = x.value.trim(); });
+    const r = await post("/api/settle_trades", body);
+    if (r.error) { $("stMsg").textContent = r.error; return; }
+    SETTR = await api("/api/settle_trades"); setlPage();
+  };
 }
 
 

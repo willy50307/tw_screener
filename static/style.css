@@ -826,3 +826,15 @@ table.ol-fair tr.ol-atm td{border-top:1px solid #ffd600;border-bottom:1px solid 
 table.ol-fair th{top:-10px;background:var(--panel);z-index:2;padding:4px}
 .ol-st{color:#8a8f99!important;font-style:italic}
 .oh-tip-atm{border-top:1px solid #444;margin-top:3px;padding-top:3px;color:#ffd600}
+/* 結算日：左邊目錄＋一次一個主題 */
+.st-wrap{display:flex;gap:10px;align-items:flex-start}
+.st-nav{display:flex;flex-direction:column;gap:4px;width:190px;flex-shrink:0;position:sticky;top:0}
+.st-nav button{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.st-nav button:hover{border-color:var(--accent)}
+.st-nav button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.st-main{flex:1;min-width:0}
+.st-link{padding:4px 10px;white-space:nowrap}
+.st-fold summary{cursor:pointer;font-weight:600;color:var(--label);user-select:none;padding:2px 0}
+.st-fold summary:hover{color:var(--text)}
+.st-form input,.st-form select,.st-form textarea{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:4px;padding:4px 6px;font:inherit;font-size:13px;margin:2px}
+@media (max-width:900px){.st-wrap{flex-direction:column}.st-nav{width:auto;flex-direction:row;flex-wrap:wrap;position:static}}

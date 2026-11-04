@@ -19,6 +19,7 @@ import capital
 import market_brief
 import waves
 import settlement
+import settle_tail
 import warrants
 import chips
 import options
@@ -871,6 +872,34 @@ def settlement_get():
     except Exception as e:
         traceback.print_exc()
         return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/settle_tail")
+def settle_tail_get():
+    try:
+        return jsonify(settle_tail.analyze())
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/settle_trades")
+def settle_trades_get():
+    return jsonify(settle_tail.trades_load())
+
+
+@app.post("/api/settle_trades")
+def settle_trades_add():
+    try:
+        return jsonify(ok=True, rec=settle_tail.trades_add(request.get_json() or {}))
+    except Exception as e:
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.delete("/api/settle_trades/<rid>")
+def settle_trades_delete(rid):
+    settle_tail.trades_delete(rid)
+    return jsonify(ok=True)
 
 
 @app.get("/api/warrants")
