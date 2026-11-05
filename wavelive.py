@@ -36,10 +36,15 @@ def _read(path):
         return []
 
 
+def _plain(o):
+    """numpy 的 bool / 數字 → Python 原生型別（json 才存得進去）"""
+    return o.item() if hasattr(o, "item") else str(o)
+
+
 def _write(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
+        json.dump(data, f, ensure_ascii=False, indent=1, default=_plain)
     os.replace(tmp, path)
 
 
@@ -186,7 +191,7 @@ def _f(x):
     return f"{x:,.0f}"
 
 
-def analyze(save=True, author="auto"):
+def analyze(save=True, author="auto", _depth=0):
     sc = current_script()
     if not sc:
         return {"error": "還沒有主劇本（data/wave_scripts.json）"}
@@ -216,8 +221,8 @@ def analyze(save=True, author="auto"):
     fibs = [{"r": r, "price": P["price"] + sgn * leg * r} for r in FIB]
     inv = sc.get("invalid") or {}
     inv_p = inv.get("price")
-    broke_inv = bool(inv_p) and ((seg["high"].max() > inv_p) if inv.get("dir", "above") == "above" else (seg["low"].min() < inv_p))
-    broke_p = (seg["low"].min() < P["price"] - 1) if now_up else (seg["high"].max() > P["price"] + 1)   # 跌破起點 → 這段反彈其實沒開始／上一浪延伸
+    broke_inv = bool(inv_p) and bool((seg["high"].max() > inv_p) if inv.get("dir", "above") == "above" else (seg["low"].min() < inv_p))
+    broke_p = bool((seg["low"].min() < P["price"] - 1) if now_up else (seg["high"].max() > P["price"] + 1))   # 跌破起點 → 這段反彈其實沒開始／上一浪延伸
 
     # 細浪：P 之後的小轉折
     # 門檻：至少 SUB_PCT，且跟著這一段的長度放大（這段走 1,800 點 → 約 270 點才算一個細浪）
@@ -291,7 +296,15 @@ def analyze(save=True, author="auto"):
                             f"代表 {now_name} 已經結束、{nxt or '下一浪'} 提早展開")
             view.append(f"大方向不變：{now_name} 走完後是 <b>{nxt or '順勢浪'}</b>（{U(not now_up)}）；只有{'突破' if now_up else '跌破'}失效價 {_f(inv_p) if inv_p else '–'} 才翻{'多' if down else '空'}")
         else:
-            view.append(f"順勢的 {now_name} 進行中，已走上一段的 {retr:.1%}")
+            moved = abs(ext - P["price"])
+            view.append(f"順勢的 {now_name} 進行中：從 {P['label']} {_f(P['price'])} 已經{'跌' if not now_up else '漲'} {_f(moved)} 點"
+                        f"（上一段的 {retr:.0%}），最{'低' if not now_up else '高'} {_f(ext)}；最新 {_f(px)}，從極值{'反彈' if not now_up else '回檔'} {_f(back)} 點")
+            hit = [t for t in sc.get("targets", []) if (t["price"] - ext) * sgn <= 0]
+            if hit:
+                view.append("已經到過的目標：" + "、".join(f"{_f(t['price'])}（{t.get('label', '')}）" for t in hit)
+                            + "；到目標區後容易出現急{0}，順勢單要先減碼".format("彈" if not now_up else "殺"))
+            if moved and back / moved >= 0.382:
+                view.append(f"從極值{'反彈' if not now_up else '回檔'}已經超過這段的 38.2%，留意 {now_name} 可能已經走完、要換劇本")
     for x in sc.get("notes_live", []):
         view.append(x)
 
@@ -315,8 +328,18 @@ def analyze(save=True, author="auto"):
         for t in sc.get("targets", []):
             longs.append(f"目標：{_f(t['price'])}（{t.get('label', '')}）")
     else:                             # 順勢浪進行中
-        (shorts if down else longs).append(f"順勢浪進行中，{'反彈' if down else '回檔'}到細浪 {'高' if down else '低'}點附近再加碼，停損放上一個細浪{'高' if down else '低'}點外")
-        (longs if down else shorts).append("逆勢單不做，等這一浪 5 段走完")
+        # 這一段（P→極值）的反彈／回檔價位
+        r382, r500 = (ext - sgn * abs(ext - P["price"]) * r for r in (0.382, 0.5))
+        subs_ = [x["price"] for x in swings[1:] if x.get("type") == ("L" if now_up else "H") and not x.get("open")]
+        sub_x = subs_[-1] if subs_ else r382          # 最近一個細浪的反向極值
+        tg = [t for t in sc.get("targets", []) if (t["price"] - ext) * sgn > 0]
+        tg_txt = "、".join(f"{_f(t['price'])}（{t.get('label', '')}）" for t in tg) or "前面的極值"
+        fw, bw = (shorts, longs) if not now_up else (longs, shorts)
+        fw.append(f"順勢{'空' if not now_up else '多'}：不追{'低' if not now_up else '高'}，等{'反彈' if not now_up else '回檔'}到 {_f(min(sub_x, r382) if not now_up else max(sub_x, r382))}~{_f(r500)}"
+                  f"（最近細浪{'高' if not now_up else '低'}點／這段的 38.2~50%）轉弱再進，停損 {_f(r500 + sgn * -60)}；目標 {tg_txt}")
+        bw.append(f"逆勢{'短多' if not now_up else '短空'}只能小量：在 {_f(tg[0]['price']) if tg else _f(ext)} 附近出現止{'跌' if not now_up else '漲'}"
+                  f"（5 分K {'低點墊高' if not now_up else '高點降低'}、長{'下' if not now_up else '上'}影線）才做，停損 {_f((tg[0]['price'] if tg else ext) + sgn * 80)}，賺 300 點左右就走")
+        bw.append(f"或是等站回 {_f(r382)}（這段的 38.2%）再{'多' if not now_up else '空'}，代表 {now_name} 可能已經走完")
     if not broke_inv:
         longs.append(f"翻多條件：{'突破' if down else '守住'} {_f(inv_p) if inv_p else '–'}")
     levels += [f"{f['r']:.1%}：{_f(f['price'])}" for f in fibs[:4]]
@@ -334,11 +357,14 @@ def analyze(save=True, author="auto"):
            "pivots": [{"label": Q["label"], "ts": qts, "price": Q["price"]}, {"label": P["label"], "ts": pts, "price": P["price"]}],
            "fibs": fibs, "invalid": inv_p,
            "bars": [[int(r.date), r.open, r.high, r.low, r.close] for r in d[d["date"] >= qts - 3600 * 6].itertuples()]}
-    if save:
+    out = json.loads(json.dumps(out, default=_plain))      # 全部轉成 Python 原生型別（Flask 的 jsonify 也不認 numpy）
+    if save and _depth == 0:
+        if broke_inv and _auto_switch(sc, out):
+            return analyze(save, author, _depth + 1)
+        if not broke_inv and broke_p and _auto_roll(sc, out, ext, ext_ts, now_up):
+            return analyze(save, author, _depth + 1)
         lean = {k: v for k, v in out.items() if k != "bars"}
         save_sub(lean)
-        if broke_inv:
-            _auto_switch(sc, out)
     _last.update(t=time.time(), v=out)
     return out
 
@@ -348,10 +374,32 @@ def _auto_switch(sc, out):
     alt = (sc.get("alt") or {}).get("script")
     today = dt.datetime.now().strftime("%Y-%m-%d")
     if not alt or any(s.get("date") == today and s.get("author") == "auto" for s in scripts()):
-        return
+        return False
     new = dict(alt, date=today, author="auto",
                change=f"{out['asof']} 價格 {_f(out['ext'])} 突破失效價 {_f(out['invalid'])}，自動把備選劇本升為主劇本（原 {sc['date']} 版：{sc.get('title', '')}）")
     save_script(new)
+    return True
+
+
+def _auto_roll(sc, out, ext, ext_ts, now_up):
+    """這一浪的起點被跌破（突破）＝這一浪已經走完：把這段的極值當成新的轉折點，自動新增今天的主劇本，改數下一浪"""
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    if any(s.get("date") == today and s.get("author") == "auto" for s in scripts()):
+        return False
+    lab = sc.get("now_label") or sc.get("now", "?")
+    t = (dt.datetime(1970, 1, 1) + dt.timedelta(seconds=int(ext_ts))).strftime("%Y-%m-%d %H:%M")
+    P = sc["pivots"][-1]
+    nxt = sc.get("next") or "下一浪"
+    new = {k: v for k, v in sc.items() if k not in ("date", "time", "author", "change", "notes_live")}
+    new.update(author="auto", title=f"{nxt}進行中（程式自動改數）",
+               pivots=sc["pivots"] + [{"label": lab, "price": ext, "t": t}],
+               now=nxt, now_label=sc.get("next_label") or nxt, now_dir="down" if now_up else "up",
+               next=sc.get("next_next", ""), next_label="",
+               invalid={"price": ext, "dir": "above" if now_up else "below",
+                        "why": f"{nxt} 不能{'漲過' if now_up else '跌破'} {lab} 的{'高' if now_up else '低'}點 {_f(ext)}"},
+               change=f"{out['asof']} {'跌破' if now_up else '突破'} {P['label']} {_f(P['price'])}，{lab} 在 {t[5:]} 的 {_f(ext)} 結束，自動改成 {nxt}（原 {sc['date']} 版：{sc.get('title', '')}）")
+    save_script(new)
+    return True
 
 
 def get(force=False):

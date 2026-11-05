@@ -664,13 +664,18 @@ async function waveLive(force){
   if (chTab !== "wave" || !$("wlBox")) return;
   if (force) { WL = null; $("wlBox").innerHTML = `<div class="k" style="padding:6px">抓最新走勢（含夜盤）重新分析中…</div>`; }
   try {
-    if (!WL) WL = await api("/api/wave_live" + (force ? "?force=1" : ""));
+    WL = await api("/api/wave_live" + (force ? "?force=1" : ""));   // 不帶 force：後端 1 分鐘內算過就直接給
     [WL_SCR, WL_SUBS] = await Promise.all([api("/api/wave_scripts"), api("/api/wave_subs")]);
   } catch(e) { if ($("wlBox")) $("wlBox").innerHTML = `<div class="k">最新波浪載入失敗：${e}</div>`; return; }
   if (chTab !== "wave" || !$("wlBox")) return;
   wlRender(); wlScrRender(); wlSubRender();
 }
 window.waveLiveRefresh = () => { if (window.CUR_PAGE === "chips" && chTab === "wave") waveLive(true); };
+// 停在波浪頁時每 60 秒自動重算一次（夜盤、盤中都會跟著更新）；展開中的主劇本／細浪下拉區不重畫
+setInterval(() => { if (window.CUR_PAGE === "chips" && chTab === "wave" && $("wlBox") && !document.hidden) waveLiveAuto(); }, 60000);
+async function waveLiveAuto(){
+  try { const x = await api("/api/wave_live?force=1"); if (!x || !$("wlBox")) return; WL = x; wlRender(); } catch(e) {}
+}
 
 function wlCells(x){
   return `<div class="lu-row wl-row">
