@@ -93,10 +93,58 @@ def _guess_und(name, names_sorted):
     return "", ""
 
 
+def _add_info(con, code_names, market, ds):
+    """warrant_info 沒有的權證（新發行、t187ap37_L 還沒更新或已下市）→ 用名稱猜標的、認購/認售，先補一筆
+    （不補的話：分點表的標的、權證名稱會變成 null）"""
+    if not code_names:
+        return 0
+    have = {r[0] for r in con.execute("SELECT code FROM warrant_info")}
+    miss = {c: n for c, n in code_names.items() if c not in have}
+    if not miss:
+        return 0
+    names = sorted({(n, c) for c, n in con.execute("SELECT code, name FROM prices WHERE date=(SELECT MAX(date) FROM prices) AND length(code)=4")},
+                   key=lambda x: -len(x[0]))
+    rows = []
+    for c, n in miss.items():
+        uc, un = _guess_und(n, names)
+        rows.append((c, n, market, "P" if "售" in n else "C", uc, un, _issuer(n), None, "", ds))
+    with _lock:
+        con.executemany("INSERT OR IGNORE INTO warrant_info VALUES(?,?,?,?,?,?,?,?,?,?)", rows)
+        con.commit()
+    return len(rows)
+
+
+def repair_info(con, progress=None, max_days=60):
+    """舊資料補救：有分點資料、卻沒有 warrant_info 的權證 → 重抓那天的證交所成交表拿名稱補上"""
+    miss = con.execute("""SELECT b.code, MAX(b.date) FROM warrant_broker b LEFT JOIN warrant_info i ON i.code=b.code
+                          WHERE i.code IS NULL GROUP BY b.code""").fetchall()
+    if not miss:
+        return 0
+    by_date = {}
+    for c, d in miss:
+        by_date.setdefault(d, set()).add(c)
+    n = 0
+    for k, (ds, codes) in enumerate(sorted(by_date.items(), reverse=True)[:max_days], 1):
+        if progress is not None:
+            progress["msg"] = f"補權證名稱 {k}/{min(len(by_date), max_days)}（{ds}）"
+        d = dt.date.fromisoformat(ds)
+        j = _get("https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX", {"date": d.strftime("%Y%m%d"), "type": "0999", "response": "json"})
+        got = {}
+        j = j or {}
+        for t in (j.get("tables") or []) if j.get("stat") == "OK" else []:
+            f = t.get("fields") or []
+            if "證券代號" in f and "證券名稱" in f:
+                i, m = f.index("證券代號"), f.index("證券名稱")
+                got.update({str(r[i]).strip(): str(r[m]).strip() for r in t.get("data") or [] if str(r[i]).strip() in codes})
+        n += _add_info(con, got, "上市", ds)
+        time.sleep(2)
+    return n
+
+
 # ---------------- 每日成交 ----------------
 def fetch_daily(con, d):
     ds = d.isoformat()
-    out = []
+    out, tw_names = [], {}
     j = _get("https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX", {"date": d.strftime("%Y%m%d"), "type": "0999", "response": "json"})
     if j is None:
         return None
@@ -110,6 +158,9 @@ def fetch_daily(con, d):
                 sign = -1 if "-" in g(r, "漲跌(+/-)") else 1
                 out.append((ds, g(r, "證券代號"), _num(g(r, "收盤價")), sign * (_num(g(r, "漲跌價差")) or 0),
                             (_num(g(r, "成交股數")) or 0) / 1000, amt, g(r, "標的代號")))
+                if g(r, "證券名稱"):
+                    tw_names[g(r, "證券代號")] = g(r, "證券名稱")
+    _add_info(con, tw_names, "上市", ds)
     j2 = _get("https://www.tpex.org.tw/www/zh-tw/afterTrading/otc", {"date": d.strftime("%Y/%m/%d"), "type": "WW", "response": "json"})
     if j2 and j2.get("date") == d.strftime("%Y%m%d"):
         info = {c: u for c, u in con.execute("SELECT code, und_code FROM warrant_info WHERE market='上櫃'")}
@@ -165,9 +216,11 @@ def update(days_back=0, top_n=TOP_N, progress=None, sleep=0.25):
     progress = {} if progress is None else progress
     con = connect()
     _init(con)
-    if con.execute("SELECT COUNT(*) FROM warrant_info").fetchone()[0] == 0 or days_back == 0:
+    last = con.execute("SELECT MAX(updated) FROM warrant_info WHERE market='上市'").fetchone()[0]
+    if days_back == 0 or not last or last < dt.date.today().isoformat():     # 每天更新一次（新權證天天發行）
         progress["msg"] = "權證基本資料…"
         update_info(con)
+        repair_info(con, progress)
     today = dt.date.today()
     trade = [r[0] for r in con.execute("SELECT DISTINCT date FROM prices WHERE code='2330' AND date >= ? ORDER BY date",
                                         ((today - dt.timedelta(days=days_back + 10)).isoformat(),))]
@@ -223,7 +276,7 @@ _cache = {}
 
 def _events_all(con, since):
     b = pd.read_sql("""SELECT b.date, b.code, b.side, b.branch, b.bid, b.bhid, b.buy, b.sell, d.volume, d.close, d.amount, d.chg,
-                              i.name, i.issuer, i.cp, i.und_code, i.und_name
+                              i.name, i.issuer, i.cp, COALESCE(NULLIF(i.und_code, ''), d.und_code, '') AS und_code, i.und_name
                        FROM warrant_broker b JOIN warrant_daily d ON d.date=b.date AND d.code=b.code
                        LEFT JOIN warrant_info i ON i.code=b.code WHERE b.date >= ?""", con, params=(since,))
     if b.empty:

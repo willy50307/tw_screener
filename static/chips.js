@@ -1114,7 +1114,7 @@ async function warrShow(){
   const W = WARR, S = SNAP || {};
   if (W.dates) $("chDate").innerHTML = W.dates.map(d => `<option ${d === W.date ? "selected" : ""}>${d}</option>`).join("");
   const st = S.status || {}, job = S.job || {};
-  const stock = (c, n) => `<span class="ch-c" data-c="${c}">${c} ${n || ""}</span>`;
+  const stock = (c, n) => c ? `<span class="ch-c" data-c="${c}">${c} ${n || ""}</span>` : `<span class="k">${n || "（標的未知）"}</span>`;
   const brLink = (b) => `<span class="wb-c" data-wb="${b}">${b}</span>`;
   const h = [];
   // ===== 盤中快照 =====
