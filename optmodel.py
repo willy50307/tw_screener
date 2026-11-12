@@ -77,6 +77,63 @@ def rv(days=20):
     x = rf.tail(days)
     return float(x.std() * math.sqrt(252) * 100) if len(x) > 5 else None
 
+YEAR_MIN = 252 * 300      # 一年的日盤交易分鐘（08:45~13:45 = 300 分鐘）
+
+
+def rv_intraday(now=None):
+    """今天台指期盤中實際波動（群益 TX00 逐筆 → 5 分K 收盤報酬的標準差，年化 %）。
+    日盤開了就只算今天日盤；還沒開就算目前有的（夜盤）。用 5 分K 而不是 1 分K，避免買賣價跳動把波動灌大。"""
+    try:
+        import capital
+        if not capital.ready():
+            return None
+        b = capital.bars_1m("TX00")
+    except Exception:
+        return None
+    if b is None or not len(b):
+        return None
+    now = now or dt.datetime.now()
+    t0 = int((dt.datetime.combine(now.date(), dt.time(8, 45)) - dt.datetime(1970, 1, 1)).total_seconds())
+    day = b[(b["date"] >= t0) & (b["date"] < t0 + 300 * 60)]
+    sess = "日盤"
+    if len(day) < 10:
+        day, sess = b, "夜盤"
+    c = day.groupby(day["date"] // 300)["close"].last()
+    r = np.diff(np.log(c.values.astype(float)))
+    if len(r) < 6:
+        return None
+    return {"rv": round(float(r.std() * math.sqrt(YEAR_MIN / 5) * 100), 1), "n": int(len(r)), "sess": sess,
+            "hi": float(day["high"].max()), "lo": float(day["low"].min())}
+
+
+def rv_minute_hist():
+    """過去日盤（data/opt_min 存的台指期 1 分K）平均實際波動，年化 %；結算日模式的合理價就是用這些分鐘漲跌模擬"""
+    r = minute_returns()
+    return round(float(r.std() * math.sqrt(YEAR_MIN) * 100), 1) if len(r) > 1000 else None
+
+
+def rv_pack():
+    """選擇權即時頁「實際波動」：今天盤中、近 5 天、近 20 天、過去日盤平均"""
+    out = {"today": rv_intraday(), "rv5": rv(5), "rv20": rv(20)}
+    for k in ("rv5", "rv20"):
+        out[k] = None if out[k] is None else round(out[k], 1)
+    try:
+        out["min_hist"] = rv_minute_hist()
+    except Exception:
+        out["min_hist"] = None
+    return out
+
+
+def judge_settle(atm_iv_tt, rvp):
+    """結算日：價平 IV（交易時間算）÷ 實際波動。今天盤中有 1 小時以上就用今天的，否則用過去日盤平均"""
+    t = (rvp or {}).get("today") or {}
+    ref, src = (t["rv"], f"今天{t['sess']}") if t.get("n", 0) >= 12 and t.get("sess") == "日盤" else ((rvp or {}).get("min_hist"), "過去日盤平均")
+    if not atm_iv_tt or not ref:
+        return {"ref": ref, "ref_src": src}
+    ratio = atm_iv_tt / ref
+    view = "偏貴" if ratio > 1.2 else "偏便宜" if ratio < 0.85 else "正常"
+    return {"ref": ref, "ref_src": src, "ratio": round(float(ratio), 2), "view": view}
+
 
 def trading_days(expire, now=None):
     """到結算還有幾個「收盤到收盤」：週末、國定假日不算（假日只算週末，夠用）；盤中算今天剩下的比例"""

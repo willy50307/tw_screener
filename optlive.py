@@ -198,7 +198,12 @@ def chain(key=None, center=None):
     F = _forward(rows, guess)
     if F:
         _ref[sel["key"]] = F
-    T = years_to(sel["expire"])
+    import optmodel
+    T_cal = years_to(sel["expire"])
+    settle_now = optmodel.is_settle_session(sel["expire"])
+    # 結算日盤中：只剩幾個小時，用日曆時間算 IV 會被放大 2~3 倍（晚上、週末根本不會動）。
+    # 改用「有效交易分鐘」（13:00 前照算，13:00~13:30 取平均只算 1/3）÷ 一年的日盤分鐘，跟實際波動同一把尺
+    T = optmodel.settle_minutes()[0] / optmodel.YEAR_MIN if settle_now else T_cal
     out = []
     for k in sorted(rows):
         row = {"k": k}
@@ -215,7 +220,8 @@ def chain(key=None, center=None):
             v = iv(F, k, T, m, cp == "C") if F and m else None
             if v:
                 g = bs(F, k, T, v, cp == "C")
-                q.update(iv=round(v * 100, 1), d=round(g["d"], 3), g=round(g["g"] * 10000, 2), th=round(g["t"], 2), vg=round(g["v"], 2))
+                th = g["t"] * (365 / 252 if settle_now else 1)     # 結算日 T 是交易年 → 換成「每個交易日」
+                q.update(iv=round(v * 100, 1), d=round(g["d"], 3), g=round(g["g"] * 10000, 2), th=round(th, 2), vg=round(g["v"], 2))
             yo = prev.get((k, cp))
             if yo is not None:
                 q["yoi"] = yo
@@ -227,11 +233,10 @@ def chain(key=None, center=None):
     atm_iv = float(np.mean(ivs)) if ivs else None
     model = None
     if F and out:      # 定價模型：每個履約價的合理價（歷史報酬分佈）、價平 IV 貴不貴
-        import optmodel
         try:
             hd = optmodel.trading_days(sel["expire"])
             fv = optmodel.fair(F, [r["k"] for r in out], hd)
-            st = optmodel.fair_settle(F, [r["k"] for r in out]) if optmodel.is_settle_session(sel["expire"]) else None
+            st = optmodel.fair_settle(F, [r["k"] for r in out]) if settle_now else None
             for r in out:
                 for i, cp in enumerate("CP"):
                     r[cp]["fair"] = round((st["fair"] if st else fv["now"])[r["k"]][i], 1)
@@ -239,7 +244,11 @@ def chain(key=None, center=None):
                     m = (rows[r["k"]].get(cp) or {}).get("mid")
                     if m and r[cp]["fair"] > 0.05:
                         r[cp]["mkt"] = round(m, 1)
-            model = {"judge": optmodel.judge(sel["kind"], T * 365, atm_iv), "long_vol": float(fv["long_vol"]), "h": round(hd, 2)}
+            model = {"judge": optmodel.judge(sel["kind"], T_cal * 365, atm_iv), "long_vol": float(fv["long_vol"]), "h": round(hd, 2)}
+            model["rv"] = optmodel.rv_pack()
+            if settle_now:      # 結算日：歷史「剩 1 天內」的 IV 是前一天收盤（含過夜），跟盤中不能比 → 改看 IV ÷ 實際波動
+                model["judge"]["settle"] = optmodel.judge_settle(atm_iv, model["rv"])
+                model["judge"]["view"] = model["judge"]["settle"].get("view", "")
             if st:      # 結算日模式：標出低於內含價值（撿便宜）、剩沒多久卻還很貴的價外單
                 under, rich = [], []
                 for r in out:
@@ -258,7 +267,8 @@ def chain(key=None, center=None):
         except Exception as e:
             model = {"error": str(e)}
     move = F * (atm_iv / 100) * math.sqrt(T) if F and atm_iv and not np.isnan(atm_iv) else None
-    return {"exps": exps, "sel": sel, "live": live, "db_date": db_date, "F": F, "T_days": round(T * 365, 2), "atm": atm,
+    return {"exps": exps, "sel": sel, "live": live, "db_date": db_date, "F": F, "T_days": round(T_cal * 365, 2), "atm": atm,
+            "iv_basis": "交易時間" if settle_now else "日曆時間",
             "atm_iv": None if atm_iv is None or np.isnan(atm_iv) else round(float(atm_iv), 1),
             "move": None if move is None else round(move), "tx": tx.get("z"), "rows": out,
             "cap": capital.status.get("msg"), "now": dt.datetime.now().strftime("%H:%M:%S"), "model": model}
