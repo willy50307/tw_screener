@@ -91,7 +91,8 @@ function olRender(){
     <div class="ol-kv"><span>價平履約價</span><b class="flat">${n(j.atm)}</b></div>
     <div class="ol-kv"><span>選擇權反推的指數價位</span><b>${n(j.F)}</b></div>
     <div class="ol-kv"><span>台指期近月</span><b>${n(j.tx)}</b></div>
-    <div class="ol-kv"><span>價平隱含波動率</span><b>${j.atm_iv == null ? "–" : j.atm_iv + "%"}</b></div>
+    <div class="ol-kv"><span title="${j.iv_basis === "交易時間" ? "結算日盤中改用交易時間（只算還剩幾分鐘的日盤）反推，才能跟實際波動直接比" : "用日曆時間（到期日 13:30）反推"}">價平隱含波動率${j.iv_basis === "交易時間" ? "（交易時間）" : ""}</span><b>${j.atm_iv == null ? "–" : j.atm_iv + "%"}</b></div>
+${olRV(j)}
     <div class="ol-kv"><span>到結算前的正常波動幅度</span><b>${j.move == null ? "–" : "上下 " + n(j.move) + " 點"}</b></div>
     <div class="ol-kv k"><span>約 68% 機率落在</span><span>${j.move == null ? "–" : n(Math.round(j.F - j.move)) + " ～ " + n(Math.round(j.F + j.move))}</span></div>
     <div class="ol-kv"><span>Call 未平倉最多</span><span class="up">${top("C").map(r => r.k).join("、") || "–"}</span></div>
@@ -100,6 +101,18 @@ function olRender(){
     <div class="ol-note k">右邊表格的欄位：「指數漲1點這檔漲幾點」就是 Delta（Put 是負的，代表指數漲它會跌）；「漲100點後上一欄加多少」是 Gamma；「每天時間價值減少」是 Theta，指數不動的話一天會少掉這麼多點；「隱含波動率」是從市價反推出來、市場預期的波動，越高代表越貴。滑鼠停在欄位標題上也有說明。雙擊表格某一列可以改成以那個履約價為中心。</div>
 ` + olModel(j);
   const sb = $("olModel").querySelector(".ol-settle"); if (sb) $("olModel").prepend(sb);   // 結算日提醒放最上面
+}
+// 實際波動（RV）：台指期真的動了多少，年化 %，跟隱含波動率同一把尺
+function olRV(j){
+  const rv = (j.model || {}).rv; if (!rv) return "";
+  const t = rv.today, n = v => v == null ? "–" : v + "%";
+  const useT = j.iv_basis === "交易時間" && t && t.rv;     // 結算日盤中：跟今天比；平常：跟近 20 天比（都含過夜）
+  const ref = useT ? t.rv : rv.rv20, r = j.atm_iv && ref ? j.atm_iv / ref : null;
+  const cl = r == null ? "" : r > 1.2 ? "up" : r < 0.85 ? "down" : "flat";
+  return `<div class="ol-kv"><span title="台指期近月今天的 5 分K 收盤，每根漲跌幅的標準差 × √(一年 252 天 × 每天 60 根)。只看今天真的動了多少">今天盤中實際波動${t ? "（" + t.sess + " " + t.n + " 根 5 分K）" : ""}</span><b>${t ? n(t.rv) : "–（要連群益）"}</b></div>
+    <div class="ol-kv"><span title="台指期近月每天收盤漲跌幅的標準差 × √252">近 5 天 ／ 近 20 天實際波動</span><b>${n(rv.rv5)} ／ ${n(rv.rv20)}</b></div>
+    ${rv.min_hist ? `<div class="ol-kv k"><span title="本機存的過去日盤 1 分K（data/opt_min），結算日模式的合理價就是用這個模擬">過去日盤平均實際波動（1 分K）</span><span>${n(rv.min_hist)}</span></div>` : ""}
+    <div class="ol-kv"><span title="大於 1.2 代表選擇權比台指期真實的波動貴（偏貴）；小於 0.85 代表便宜">隱含波動率 ÷ ${useT ? "今天" : "近 20 天"}實際波動</span><b class="${cl}">${r == null ? "–" : r.toFixed(2)}</b></div>`;
 }
 // 定價模型小框：價平 IV 貴不貴 ＋ 價外各履約價 市價 vs 合理價
 function olModel(j){
@@ -121,10 +134,14 @@ function olModel(j){
       <div style="margin-top:6px"><b>低於內含價值（買進等結算幾乎穩賺）</b>：${st.under.length ? st.under.map(x => `${x.cp === "C" ? "買權" : "賣權"} ${x.k}：賣價 ${x.buy}、內含 ${x.intr}，多 ${x.gain} 點`).join("；") : "目前沒有"}</div>
       <div style="margin-top:4px"><b>價外卻還很貴（通常是有人在賣）</b>：${st.rich.length ? st.rich.map(x => `${x.cp === "C" ? "買權" : "賣權"} ${x.k}（價外 ${x.otm} 點）市價 ${x.mkt}、合理 ${x.fair}`).join("；") : "目前沒有"}</div>
       <div class="k" style="margin-top:4px">表格裡「撿」= 低於內含價值、「貴」= 價外偏貴。注意：成交量少的履約價買賣價差大，成交價可能是好幾分鐘前的，下單前看買賣價。</div></div>`;
+  const gs = g.settle;
+  const head = gs ? `<div class="ol-kv"><span>價平隱含波動率（交易時間） ／ ${gs.ref_src}實際波動</span><b>${j.atm_iv ?? "–"}% ／ ${n(gs.ref)}%</b></div>
+    <div class="ol-kv"><span>隱含波動率 ÷ 實際波動</span><b>${gs.ratio ?? "–"}</b><span class="k">（大於 1.2 偏貴、小於 0.85 偏便宜）</span></div>
+    <div class="ol-kv k"><span>參考：近 20 天實際波動</span><span>${n(g.rv20)}%</span></div>` : `<div class="ol-kv"><span>價平隱含波動率 ／ 近 20 天實際波動</span><b>${j.atm_iv ?? "–"}% ／ ${n(g.rv20)}%</b></div>`;
   return settle + `<h3 style="margin-top:12px">定價模型${st ? "（結算日：剩幾分鐘算）" : ""}　<span class="${vc}">${g.view || ""}</span></h3>
-    <div class="ol-kv"><span>價平隱含波動率 ／ 近 20 天實際波動</span><b>${j.atm_iv ?? "–"}% ／ ${n(g.rv20)}%</b></div>
-    <div class="ol-kv"><span>隱含波動率 ÷ 實際波動</span><b>${g.ratio ?? "–"}</b><span class="k">（過去同樣天數平均 ${g.ratio_avg ?? "–"}）</span></div>
-    <div class="ol-kv"><span>剩 ${g.bucket || ""}到期的歷史隱含波動率</span><span>平均 ${g.avg ?? "–"}%，現在高過 ${g.pct ?? "–"}% 的日子</span></div>
+    ${head}
+    ${gs ? "" : `<div class="ol-kv"><span>隱含波動率 ÷ 實際波動</span><b>${g.ratio ?? "–"}</b><span class="k">（過去同樣天數平均 ${g.ratio_avg ?? "–"}）</span></div>
+    <div class="ol-kv"><span>剩 ${g.bucket || ""}到期的歷史隱含波動率</span><span>平均 ${g.avg ?? "–"}%，現在高過 ${g.pct ?? "–"}% 的日子</span></div>`}
     <div class="ol-kv k"><span>剩餘交易日（收盤到收盤）</span><span>${m.h} 天</span></div>
     <div class="ol-fair2">${side("C")}${side("P")}</div>
     <div class="ol-note k">合理價 = 用加權指數 2015 年以來每天的漲跌（保留暴漲暴跌的肥尾）模擬到結算的指數，算出每個履約價平均能拿回多少。
