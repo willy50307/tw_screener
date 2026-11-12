@@ -867,3 +867,4 @@ table.ol-fair th{top:-10px;background:var(--panel);z-index:2;padding:4px}
 .wl-form label{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:12px}
 .wl-form input,.wl-form textarea,.wl-form select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit}
 .wl-f2{display:flex;gap:8px;flex-wrap:wrap}.wl-f2 label{flex:1;min-width:120px}
+.ol-volbar{white-space:nowrap}.ol-volbar b{font-size:14px}

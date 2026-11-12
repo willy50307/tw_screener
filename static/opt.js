@@ -77,6 +77,7 @@ function olRender(){
         <td class="oh-k">${r.k}</td>
         <td class="${itmP ? "oh-itm" : ""}">${px(p)}</td><td class="${itmP ? "oh-itm" : ""}">${n(p.bid)}</td><td class="${itmP ? "oh-itm" : ""}">${n(p.ask)}</td><td class="k">${n(p.v)}</td>
         <td>${tt(p.th)}</td><td>${gg(p.g)}</td><td>${p.d == null ? "" : p.d.toFixed(2)}</td><td>${f1(p.iv)}</td><td>${doi(p)}</td><td class="ol-oi">${bar(p.oi, "p")}<span>${n(p.oi)}</span></td></tr>`; }).join("") + "</tbody>";
+  $("olSrc").innerHTML += olVolBar(j);
   if (ol.center) { $("olSrc").innerHTML += `　<button class="btn ghost" id="olReset">回到價平（現在以 ${ol.center} 為中心）</button>`;
     $("olReset").onclick = () => { ol.center = null; ol.scrolled = false; olTick(); }; }
   if (j.model && j.model.settle) $("olSrc").innerHTML = `<b class="ol-settle-tag">⚠ 結算日模式：今天日盤 13:30 結算</b>　` + $("olSrc").innerHTML;
@@ -101,6 +102,20 @@ ${olRV(j)}
     <div class="ol-note k">右邊表格的欄位：「指數漲1點這檔漲幾點」就是 Delta（Put 是負的，代表指數漲它會跌）；「漲100點後上一欄加多少」是 Gamma；「每天時間價值減少」是 Theta，指數不動的話一天會少掉這麼多點；「隱含波動率」是從市價反推出來、市場預期的波動，越高代表越貴。滑鼠停在欄位標題上也有說明。雙擊表格某一列可以改成以那個履約價為中心。</div>
 ` + olModel(j);
   const sb = $("olModel").querySelector(".ol-settle"); if (sb) $("olModel").prepend(sb);   // 結算日提醒放最上面
+}
+// 報價表上方：價平隱波 vs 今天盤中實際波動，一眼看出選擇權貴還便宜
+function olVolBar(j){
+  const rv = (j.model || {}).rv || {}, t = rv.today;
+  const real = t && t.rv ? t.rv : null;
+  const r = j.atm_iv && real ? j.atm_iv / real : null;
+  const view = r == null ? "" : r > 1.2 ? "偏貴" : r < 0.85 ? "偏便宜" : "正常";
+  const cl = r == null ? "flat" : r > 1.2 ? "up" : r < 0.85 ? "down" : "flat";
+  const tip = "實際波動：台指期近月今天 5 分K，每根漲跌幅的標準差，換算成一年（× √(252×60)）。" +
+    "隱波 ÷ 實際 < 0.85 代表選擇權的定價比台指期今天真的在動的幅度還小（便宜）；> 1.2 代表貴。" +
+    (j.iv_basis === "交易時間" ? "結算日：隱波用剩下的交易分鐘算，才能跟實際波動直接比。" : "平常日隱波含過夜，跟盤中實際波動比只當參考，左邊另有近 20 天比較。");
+  return `<span class="ol-volbar" title="${tip}">　｜　價平隱波 <b>${j.atm_iv == null ? "–" : j.atm_iv + "%"}</b>
+    　盤中實際波動 <b>${real == null ? "–" : real + "%"}</b>${t ? `<span class="k">（${t.sess}，${t.n} 根 5 分K，高低差 ${qNum(Math.round(t.hi - t.lo))} 點）</span>` : `<span class="k">（要連群益）</span>`}
+    　隱波÷實際 <b class="${cl}">${r == null ? "–" : r.toFixed(2) + " " + view}</b></span>`;
 }
 // 實際波動（RV）：台指期真的動了多少，年化 %，跟隱含波動率同一把尺
 function olRV(j){
