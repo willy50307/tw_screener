@@ -105,24 +105,27 @@ ${olRV(j)}
 }
 // 報價表上方：價平隱波 vs 今天盤中實際波動，一眼看出選擇權貴還便宜
 function olVolBar(j){
-  const rv = (j.model || {}).rv || {}, t = rv.today;
-  const real = t && t.rv ? t.rv : null;
-  const r = j.atm_iv && real ? j.atm_iv / real : null;
+  const rv = (j.model || {}).rv || {}, t = rv.today, settle = j.iv_basis === "交易時間";
+  const iv = j.atm_iv_tt ?? j.atm_iv;
+  // 結算日盤中：跟今天盤中比；平常：跟近 20 天（日K，含過夜跳空）比，今天盤中只當參考
+  const real = settle ? (t && t.rv ? t.rv : null) : rv.rv20, realName = settle ? "今天盤中實際波動" : "近 20 天實際波動";
+  const r = iv && real ? iv / real : null;
   const view = r == null ? "" : r > 1.2 ? "偏貴" : r < 0.85 ? "偏便宜" : "正常";
   const cl = r == null ? "flat" : r > 1.2 ? "up" : r < 0.85 ? "down" : "flat";
-  const tip = "實際波動：台指期近月今天 5 分K，每根漲跌幅的標準差，換算成一年（× √(252×60)）。" +
-    "隱波 ÷ 實際 < 0.85 代表選擇權的定價比台指期今天真的在動的幅度還小（便宜）；> 1.2 代表貴。" +
-    (j.iv_basis === "交易時間" ? "結算日：隱波用剩下的交易分鐘算，才能跟實際波動直接比。" : "平常日隱波含過夜，跟盤中實際波動比只當參考，左邊另有近 20 天比較。");
-  return `<span class="ol-volbar" title="${tip}">　｜　價平隱波 <b>${j.atm_iv == null ? "–" : j.atm_iv + "%"}</b>
-    　盤中實際波動 <b>${real == null ? "–" : real + "%"}</b>${t ? `<span class="k">（${t.sess}，${t.n} 根 5 分K，高低差 ${qNum(Math.round(t.hi - t.lo))} 點）</span>` : `<span class="k">（要連群益）</span>`}
-    　隱波÷實際 <b class="${cl}">${r == null ? "–" : r.toFixed(2) + " " + view}</b></span>`;
+  const tip = "實際波動：台指期近月的 K 棒漲跌幅標準差，換算成一年。盤中用今天 5 分K（× √(252×60)），近 20 天用日K（× √252）。" +
+    "隱波（交易時間）：把價平隱波從日曆時間換成剩幾個交易日 ÷ 252，晚上、週末不算，才能跟實際波動比。" +
+    "隱波 ÷ 實際 < 0.85 偏便宜、> 1.2 偏貴。";
+  return `<span class="ol-volbar" title="${tip}">　｜　價平隱波 <b>${iv == null ? "–" : iv + "%"}</b>${!settle && j.atm_iv != null ? `<span class="k">（日曆時間 ${j.atm_iv}%）</span>` : ""}
+    　${realName} <b>${real == null ? "–" : real + "%"}</b>
+    　隱波÷實際 <b class="${cl}">${r == null ? "–" : r.toFixed(2) + " " + view}</b>
+    　<span class="k">今天盤中實際 ${t && t.rv ? t.rv + "%（" + t.sess + " " + t.n + " 根 5 分K，高低差 " + qNum(Math.round(t.hi - t.lo)) + " 點）" : "–（要連群益）"}</span></span>`;
 }
 // 實際波動（RV）：台指期真的動了多少，年化 %，跟隱含波動率同一把尺
 function olRV(j){
   const rv = (j.model || {}).rv; if (!rv) return "";
   const t = rv.today, n = v => v == null ? "–" : v + "%";
   const useT = j.iv_basis === "交易時間" && t && t.rv;     // 結算日盤中：跟今天比；平常：跟近 20 天比（都含過夜）
-  const ref = useT ? t.rv : rv.rv20, r = j.atm_iv && ref ? j.atm_iv / ref : null;
+  const ivx = j.atm_iv_tt ?? j.atm_iv, ref = useT ? t.rv : rv.rv20, r = ivx && ref ? ivx / ref : null;
   const cl = r == null ? "" : r > 1.2 ? "up" : r < 0.85 ? "down" : "flat";
   return `<div class="ol-kv"><span title="台指期近月今天的 5 分K 收盤，每根漲跌幅的標準差 × √(一年 252 天 × 每天 60 根)。只看今天真的動了多少">今天盤中實際波動${t ? "（" + t.sess + " " + t.n + " 根 5 分K）" : ""}</span><b>${t ? n(t.rv) : "–（要連群益）"}</b></div>
     <div class="ol-kv"><span title="台指期近月每天收盤漲跌幅的標準差 × √252">近 5 天 ／ 近 20 天實際波動</span><b>${n(rv.rv5)} ／ ${n(rv.rv20)}</b></div>

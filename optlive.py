@@ -267,8 +267,21 @@ def chain(key=None, center=None):
         except Exception as e:
             model = {"error": str(e)}
     move = F * (atm_iv / 100) * math.sqrt(T) if F and atm_iv and not np.isnan(atm_iv) else None
+    # 換成「交易時間」的隱波：日曆時間會把晚上、週末也算進去，剩不到一兩天時數字會被放大，
+    # 換成剩幾個交易日（收盤到收盤，含過夜）÷ 252，才能跟實際波動（日K × √252）放在一起比
+    atm_iv_tt = None
+    if atm_iv and not np.isnan(atm_iv):
+        if settle_now:
+            atm_iv_tt = atm_iv
+        else:
+            try:
+                h_tr = optmodel.trading_days(sel["expire"]) / 252
+                atm_iv_tt = atm_iv * math.sqrt(T_cal / h_tr) if h_tr > 0 and T_cal > 0 else None
+            except Exception:
+                atm_iv_tt = None
     return {"exps": exps, "sel": sel, "live": live, "db_date": db_date, "F": F, "T_days": round(T_cal * 365, 2), "atm": atm,
             "iv_basis": "交易時間" if settle_now else "日曆時間",
+            "atm_iv_tt": None if atm_iv_tt is None else round(float(atm_iv_tt), 1),
             "atm_iv": None if atm_iv is None or np.isnan(atm_iv) else round(float(atm_iv), 1),
             "move": None if move is None else round(move), "tx": tx.get("z"), "rows": out,
             "cap": capital.status.get("msg"), "now": dt.datetime.now().strftime("%H:%M:%S"), "model": model}
