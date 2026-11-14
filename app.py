@@ -23,6 +23,7 @@ import settlement
 import settle_tail
 import warrants
 import chips
+import credit
 import options
 import limitup
 import live
@@ -780,6 +781,15 @@ def run_chips(days_back, broker_days, kinds=None):
 def chips_get():
     try:
         return jsonify(chips.report(request.args.get("date") or None))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/credit")
+def credit_get():
+    try:
+        return jsonify(credit.get(request.args.get("force") == "1"))
     except Exception as e:
         traceback.print_exc()
         return jsonify(error=f"{type(e).__name__}: {e}")

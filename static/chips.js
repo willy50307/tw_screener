@@ -1,6 +1,6 @@
 // ---------- 籌碼整理頁 ----------
 let CH = null, chDate = "";
-const CH_TABS = [["brief", "🧭 今日盤勢分析"], ["wave", "🌊 波浪"], ["setl", "📅 結算日"], ["warr", "🎫 權證分點"], ["opt", "📈 選擇權未平倉"], ["inst", "🏦 三大法人"], ["dt", "🎯 隔日沖分點"], ["trend", "🌊 資金流向"], ["margin", "💳 融資券／借券"], ["tuyang", "🤝 土洋同步"]];
+const CH_TABS = [["brief", "🧭 今日盤勢分析"], ["wave", "🌊 波浪"], ["setl", "📅 結算日"], ["warr", "🎫 權證分點"], ["opt", "📈 選擇權未平倉"], ["inst", "🏦 三大法人"], ["dt", "🎯 隔日沖分點"], ["trend", "🌊 資金流向"], ["margin", "💳 融資券／借券"], ["tuyang", "🤝 土洋同步"], ["credit", "💵 美國信用利差"]];
 let chTab = (() => { const u = new URLSearchParams(location.search).get("ch"); if (u) return u;   // 網址 ?page=chips&ch=setl 可以直接開某個分頁
   try { return localStorage.getItem("chTab") || "inst"; } catch(e) { return "inst"; } })();
 let chWho = "fi", chEtf = false;
@@ -25,11 +25,12 @@ async function chShow(){
   if (chTab === "setl") { setlShow(); chStatus(); return; }
   if (chTab === "warr") { warrShow(); chStatus(); return; }
   if (chTab === "opt") { optShow(); chStatus(); return; }
+  if (chTab === "credit") { creditShow(); chStatus(); return; }
   if (!CH || (chDate && CH.date !== chDate)) {
     $("chBody").innerHTML = `<div class="k" style="padding:20px">整理資料中…</div>`;
     try { CH = await api("/api/chips" + (chDate ? "?date=" + chDate : "")); } catch(e) { setTimeout(chShow, 3000); return; }
   }
-  if (["brief", "wave", "setl", "opt", "warr"].includes(chTab)) return;   // CH 載入期間已經切到別的分頁
+  if (["brief", "wave", "setl", "opt", "warr", "credit"].includes(chTab)) return;   // CH 載入期間已經切到別的分頁
   chRender();
   chStatus();
 }
@@ -40,6 +41,7 @@ function chRender(){
   if (chTab === "setl") return setlShow();
   if (chTab === "warr") return warrShow();
   if (chTab === "opt") return optShow();
+  if (chTab === "credit") return creditShow();
   if (!CH || CH.error) { $("chBody").innerHTML = `<div class="k" style="padding:20px">${CH ? CH.error : ""}</div>`; return; }
   $("chDate").innerHTML = CH.dates.map(d => `<option ${d === CH.date ? "selected" : ""}>${d}</option>`).join("");
   const f = {inst: chInst, dt: chDt, trend: chTrend, margin: chMargin, tuyang: chTuyang}[chTab] || chInst;
@@ -1093,6 +1095,81 @@ function setlNight5Chart(O){
   ch.addSeries(LW.LineSeries, {color: "rgba(255,255,255,.35)", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false})
     .setData([{time: t0, value: 0}, {time: t0 + 59 * 300, value: 0}]);
   const fit = () => ch.timeScale().fitContent(); fit(); [80, 400].forEach(ms => setTimeout(fit, ms));
+}
+
+// ---------- 💵 美國信用利差（FRED：ICE BofA OAS） ----------
+let CRED = null, CRED_CH = null;
+let credRng = lsGet("credRng", "1Y"), credOn = (() => { try { return JSON.parse(localStorage.getItem("credOn")) || ["hy", "ig"]; } catch(e) { return ["hy", "ig"]; } })();
+const CRED_RNG = [["3M", 92], ["6M", 183], ["1Y", 365], ["3Y", 1096], ["ALL", 0]];
+const credBp = v => v == null ? "–" : `<span class="${v > 0 ? "up" : v < 0 ? "down" : ""}">${v > 0 ? "+" : ""}${Math.round(v * 100)} bp</span>`;
+async function creditShow(force){
+  if (!CRED || force) {
+    $("chBody").innerHTML = `<div class="k" style="padding:20px">${force ? "重新抓 FRED 資料中…" : "載入美國信用利差中…"}</div>`;
+    try { CRED = await api("/api/credit" + (force ? "?force=1" : "")); } catch(e) { $("chBody").innerHTML = `<div class="k" style="padding:20px">載入失敗：${e}</div>`; return; }
+  }
+  if (chTab !== "credit") return;
+  const C = CRED;
+  if (C.error) { $("chBody").innerHTML = `<div class="k" style="padding:20px">${C.error}</div>`; return; }
+  const S = C.series, hy = S.hy && S.hy.stats;
+  $("chDate").innerHTML = `<option>${hy ? hy.date : ""}</option>`;
+  const card = k => { const x = S[k]; if (!x) return ""; const s = x.stats;
+    return `<div class="mcard"><span class="k" style="color:${x.color}">● ${x.name}</span><b>${s.last.toFixed(2)}%</b>
+      <span class="k">日 ${credBp(s.d1)}　週 ${credBp(s.w1)}　月 ${credBp(s.m1)}</span>
+      <span class="k">3月 ${credBp(s.m3)}　1年 ${credBp(s.y1)}</span>
+      <span class="k">一年區間 ${s.y1_lo.toFixed(2)} ~ ${s.y1_hi.toFixed(2)}（位置 ${fmt(s.pct_1y, 0)}%）</span>
+      <span class="k">MA20 ${s.ma20.toFixed(2)}　MA60 ${s.ma60.toFixed(2)}</span></div>`; };
+  const errs = Object.entries(C.errors || {});
+  $("chBody").innerHTML = `
+    <div class="lu-box brief-sum"><div class="lu-title">💡 美國信用利差（${hy ? hy.date : ""}）　<span class="k">利差上升＝市場要求更高風險補償＝避險情緒升溫</span></div>
+      <div class="lu-guide"><ul>${(C.notes || []).map(x => `<li>${x}</li>`).join("")}
+        ${S.hy ? `<li>高收益債利差歷史（${S.hy.stats.from} 起）最低 ${S.hy.stats.lo[1]}%（${S.hy.stats.lo[0]}）、最高 ${S.hy.stats.hi[1]}%（${S.hy.stats.hi[0]}），目前位在第 ${fmt(S.hy.stats.pct_all, 0)} 百分位</li>` : ""}
+      </ul></div></div>
+    <div class="ch-cards">${["hy", "ig", "bbb", "ccc", "gap"].map(card).join("")}</div>
+    <div class="lu-box"><div class="lu-title">📈 利差走勢（%）
+      <span class="tfbar" style="position:static;display:inline-flex;margin-left:10px">${CRED_RNG.map(([k]) => `<button class="${k === credRng ? "on" : ""}" data-crng="${k}">${k === "ALL" ? "全部" : k}</button>`).join("")}</span>
+      <span style="margin-left:10px">${["hy", "ig", "bbb", "ccc", "gap"].filter(k => S[k]).map(k => `<label style="margin-right:8px;color:${S[k].color}"><input type="checkbox" data-cser="${k}" ${credOn.includes(k) ? "checked" : ""}>${S[k].name}</label>`).join("")}</span>
+      <span class="tfbar" style="position:static;display:inline-flex;float:right"><button id="credForce">🔄 重抓</button></span></div>
+      <div id="credChart" style="height:420px"></div>
+      <div class="k" style="margin-top:6px">虛線＝高收益債 20 日均線。資料：美國聖路易聯準銀行 FRED（ICE BofA Option-Adjusted Spread），美國交易日收盤，約晚一天更新；抓取時間 ${C.fetched.replace("T", " ")}${errs.length ? `；<span class="up">部分抓取失敗（沿用舊資料）：${errs.map(([k, v]) => k + " " + v).join("、")}</span>` : ""}</div></div>
+    <div class="lu-box"><div class="lu-title">📋 最近 20 個交易日</div><div class="ch-scroll">${credTable()}</div></div>`;
+  document.querySelectorAll("[data-crng]").forEach(b => b.onclick = () => { credRng = b.dataset.crng; try { localStorage.setItem("credRng", credRng); } catch(e) {} creditShow(); });
+  document.querySelectorAll("[data-cser]").forEach(b => b.onchange = () => {
+    credOn = [...document.querySelectorAll("[data-cser]:checked")].map(x => x.dataset.cser);
+    try { localStorage.setItem("credOn", JSON.stringify(credOn)); } catch(e) {}
+    credChart(); });
+  $("credForce").onclick = () => creditShow(true);
+  credChart();
+}
+function credTable(){
+  const S = CRED.series, keys = ["hy", "ig", "bbb", "ccc", "gap"].filter(k => S[k]);
+  const maps = Object.fromEntries(keys.map(k => [k, new Map(S[k].rows)]));
+  const base = (S.hy || S[keys[0]]).rows.slice(-21);
+  const rows = base.slice(1).map((r, i) => ({date: r[0], prev: base[i][0]})).reverse();
+  return chTable([["日期", r => `<td>${r.date}</td>`], ...keys.map(k => [S[k].name, r => {
+    const v = maps[k].get(r.date), p = maps[k].get(r.prev);
+    return `<td>${v == null ? "–" : v.toFixed(2) + "%"} <span class="k">${v != null && p != null ? credBp(v - p) : ""}</span></td>`; }])], rows);
+}
+function credChart(){
+  const el = $("credChart"); if (!el || !CRED) return;
+  if (CRED_CH) { try { CRED_CH.remove(); } catch(e) {} CRED_CH = null; }
+  const S = CRED.series, days = (CRED_RNG.find(x => x[0] === credRng) || [0, 365])[1];
+  const last = S.hy ? S.hy.stats.date : Object.values(S)[0].stats.date;
+  const from = days ? new Date(new Date(last).getTime() - days * 864e5).toISOString().slice(0, 10) : "";
+  const ch = CRED_CH = LW.createChart(el, {autoSize: true, layout: {background: {color: "#1e222d"}, textColor: "#d1d4dc"},
+    grid: {vertLines: {color: "#262b38"}, horzLines: {color: "#262b38"}}, rightPriceScale: {borderColor: "#2a2e39"},
+    timeScale: {borderColor: "#2a2e39"}, crosshair: {mode: 0}, localization: TW_LOCALE});
+  const pf = {type: "custom", formatter: v => v.toFixed(2) + "%"};
+  credOn.filter(k => S[k]).forEach(k => {
+    const rows = S[k].rows.filter(r => r[0] >= from);
+    ch.addSeries(LW.LineSeries, {color: S[k].color, lineWidth: k === "hy" ? 2.5 : 1.5, priceLineVisible: false, title: S[k].name, priceFormat: pf})
+      .setData(rows.map(r => ({time: r[0], value: r[1]})));
+    if (k === "hy") {
+      const all = S.hy.rows, ma = [];
+      all.forEach((r, i) => { if (i >= 19 && r[0] >= from) ma.push({time: r[0], value: Math.round(all.slice(i - 19, i + 1).reduce((a, x) => a + x[1], 0) / 20 * 100) / 100}); });
+      ch.addSeries(LW.LineSeries, {color: "rgba(255,112,67,.55)", lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: "MA20", priceFormat: pf}).setData(ma);
+    }
+  });
+  const fit = () => { try { ch.timeScale().fitContent(); } catch(e) {} }; fit(); [80, 400].forEach(ms => setTimeout(fit, ms));
 }
 
 
